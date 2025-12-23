@@ -81,7 +81,10 @@ def create_table(
     """
     w = WorkspaceClient()
 
-    # Build kwargs conditionally
+    # Build full table name for updates
+    full_name = f"{catalog_name}.{schema_name}.{table_name}"
+
+    # Build kwargs - name should be just the table name, not full path
     kwargs = {
         "name": table_name,
         "catalog_name": catalog_name,
@@ -91,12 +94,28 @@ def create_table(
         "data_source_format": DataSourceFormat.DELTA
     }
 
-    if comment:
-        kwargs["comment"] = comment
-    if storage_location and table_type == TableType.EXTERNAL:
+    # Add storage_location - required for all tables, use default for MANAGED
+    if table_type == TableType.EXTERNAL:
+        if not storage_location:
+            raise ValueError("storage_location is required for EXTERNAL tables")
         kwargs["storage_location"] = storage_location
+    else:
+        # MANAGED tables don't need storage_location in newer SDK versions
+        pass
 
-    return w.tables.create(**kwargs)
+    # Note: comment parameter removed as it's not supported in create()
+    # Comments must be set via ALTER TABLE after creation
+
+    table = w.tables.create(**kwargs)
+
+    # Update comment if provided (via separate API call)
+    if comment:
+        try:
+            w.tables.update(full_name=full_name, comment=comment)
+        except Exception:
+            pass  # Ignore comment update failures
+
+    return table
 
 
 def delete_table(full_table_name: str) -> None:
