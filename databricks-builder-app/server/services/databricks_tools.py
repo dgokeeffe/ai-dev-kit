@@ -70,7 +70,8 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
     """Create SDK tool wrapper for a FastMCP function.
 
     The wrapper runs the sync function in a thread pool to avoid
-    blocking the async event loop.
+    blocking the async event loop. It also handles JSON string parsing
+    for complex types (lists, dicts) that the Claude agent may pass as strings.
     """
 
     @tool(name, description, schema)
@@ -79,9 +80,23 @@ def _make_wrapper(name: str, description: str, schema: dict, fn):
         print(f'[MCP TOOL] {name} called with args: {args}', file=sys.stderr, flush=True)
         logger.info(f'[MCP] Tool {name} called with args: {args}')
         try:
+            # Parse JSON strings for complex types (Claude agent sometimes sends these as strings)
+            parsed_args = {}
+            for key, value in args.items():
+                if isinstance(value, str) and value.strip().startswith(('[', '{')):
+                    # Try to parse as JSON if it looks like a list or dict
+                    try:
+                        parsed_args[key] = json.loads(value)
+                        print(f'[MCP TOOL] Parsed {key} from JSON string', file=sys.stderr, flush=True)
+                    except json.JSONDecodeError:
+                        # Not valid JSON, keep as string
+                        parsed_args[key] = value
+                else:
+                    parsed_args[key] = value
+            
             # FastMCP tools are sync - run in thread pool
             print(f'[MCP TOOL] Running {name} in thread pool...', file=sys.stderr, flush=True)
-            result = await asyncio.to_thread(fn, **args)
+            result = await asyncio.to_thread(fn, **parsed_args)
             result_str = json.dumps(result, default=str)
             print(f'[MCP TOOL] {name} completed, result length: {len(result_str)}', file=sys.stderr, flush=True)
             return {'content': [{'type': 'text', 'text': result_str}]}

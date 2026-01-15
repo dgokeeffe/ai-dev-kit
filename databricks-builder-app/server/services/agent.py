@@ -6,15 +6,21 @@ with directory-scoped file permissions and Databricks tools.
 Databricks tools are loaded in-process from databricks-mcp-server using
 the SDK tool wrapper. Auth is handled via contextvars for multi-user support.
 
-NOTE: There is a known bug in claude-agent-sdk (issue #462) where the subprocess
-transport fails in FastAPI/uvicorn contexts when using MCP servers.
+NOTE: Fresh event loop workaround applied to fix claude-agent-sdk issue #462
+where subprocess transport fails in FastAPI/uvicorn contexts.
+See: https://github.com/anthropics/claude-agent-sdk-python/issues/462
 """
 
+import asyncio
 import logging
 import traceback
 import sys
+import json
 from pathlib import Path
 from typing import AsyncIterator
+import threading
+import queue
+from contextvars import copy_context
 
 from claude_agent_sdk import ClaudeAgentOptions, query
 from claude_agent_sdk.types import (
@@ -51,6 +57,44 @@ BUILTIN_TOOLS = [
 _databricks_server = None
 _databricks_tool_names = None
 
+# Cached Claude settings (loaded once)
+_claude_settings = None
+
+
+def _load_claude_settings() -> dict:
+  """Load Claude settings from repository root .claude/settings.json.
+  
+  This ensures the agent gets Databricks auth settings (ANTHROPIC_AUTH_TOKEN,
+  ANTHROPIC_BASE_URL) even when running in project subdirectories.
+  
+  Returns:
+      Dictionary of environment variables from settings.json
+  """
+  global _claude_settings
+  
+  if _claude_settings is not None:
+    return _claude_settings
+  
+  # Navigate from server/services/agent.py up to ai-dev-kit/
+  repo_root = Path(__file__).parent.parent.parent.parent
+  settings_path = repo_root / ".claude" / "settings.json"
+  
+  if settings_path.exists():
+    try:
+      with open(settings_path) as f:
+        settings = json.load(f)
+        _claude_settings = settings.get("env", {})
+        logger.info(f"Loaded Claude settings from {settings_path}")
+        return _claude_settings
+    except Exception as e:
+      logger.warning(f"Failed to load Claude settings: {e}")
+      _claude_settings = {}
+      return _claude_settings
+  else:
+    logger.warning(f"Claude settings not found at {settings_path}")
+    _claude_settings = {}
+    return _claude_settings
+
 
 def get_databricks_tools():
   """Get cached Databricks tools, loading if needed."""
@@ -73,6 +117,47 @@ def get_project_directory(project_id: str) -> Path:
       Path to the project directory
   """
   return _ensure_project_directory(project_id)
+
+
+def _run_agent_in_fresh_loop(message, options, result_queue, context):
+  """Run agent in a fresh event loop (workaround for issue #462).
+
+  This function runs in a separate thread with a fresh event loop to avoid
+  the subprocess transport issues in FastAPI/uvicorn contexts.
+
+  Args:
+      message: User message to send to the agent
+      options: ClaudeAgentOptions for the agent
+      result_queue: Queue to send results back to the main thread
+      context: Copy of contextvars context (for Databricks auth, etc.)
+
+  See: https://github.com/anthropics/claude-agent-sdk-python/issues/462
+  """
+  # Run in the copied context to preserve contextvars (like Databricks auth)
+  def run_with_context():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    async def run_query():
+      # Create prompt generator in the fresh event loop context
+      async def prompt_generator():
+        yield {'type': 'user', 'message': {'role': 'user', 'content': message}}
+
+      try:
+        async for msg in query(prompt=prompt_generator(), options=options):
+          result_queue.put(('message', msg))
+      except Exception as e:
+        result_queue.put(('error', e))
+      finally:
+        result_queue.put(('done', None))
+
+    try:
+      loop.run_until_complete(run_query())
+    finally:
+      loop.close()
+
+  # Execute in the copied context
+  context.run(run_with_context)
 
 
 async def stream_agent_response(
@@ -118,7 +203,7 @@ async def stream_agent_response(
     # Get in-process Databricks tools
     databricks_server, databricks_tool_names = get_databricks_tools()
     allowed_tools.extend(databricks_tool_names)
-    logger.info(f'Databricks tools enabled: {len(databricks_tool_names)} tools')
+    logger.info(f'Databricks MCP server configured with {len(databricks_tool_names)} tools')
 
     # Generate system prompt with available skills, cluster, and catalog/schema context
     system_prompt = get_system_prompt(
@@ -126,6 +211,9 @@ async def stream_agent_response(
       default_catalog=default_catalog,
       default_schema=default_schema,
     )
+
+    # Load Claude settings for Databricks model serving authentication
+    claude_env = _load_claude_settings()
 
     options = ClaudeAgentOptions(
       cwd=str(project_dir),
@@ -135,71 +223,88 @@ async def stream_agent_response(
       mcp_servers={'databricks': databricks_server},  # In-process SDK tools
       system_prompt=system_prompt,  # Databricks-focused system prompt
       setting_sources=["user", "project"],  # Load Skills from filesystem
+      env=claude_env,  # Pass Databricks auth settings (ANTHROPIC_AUTH_TOKEN, etc.)
     )
 
-    # Workaround for SDK bug: use async generator for prompt when using MCP servers
-    # See: https://github.com/anthropics/claude-agent-sdk-python/issues/386
-    async def prompt_generator():
-      yield {'type': 'user', 'message': {'role': 'user', 'content': message}}
+    # Run agent in fresh event loop to avoid subprocess transport issues (#462)
+    # Copy the context to preserve contextvars (Databricks auth) in the new thread
+    ctx = copy_context()
+    result_queue = queue.Queue()
+    agent_thread = threading.Thread(
+      target=_run_agent_in_fresh_loop,
+      args=(message, options, result_queue, ctx),
+      daemon=True
+    )
+    agent_thread.start()
 
-    async for msg in query(prompt=prompt_generator(), options=options):
-      # Handle different message types
-      if isinstance(msg, AssistantMessage):
-        # Process content blocks
-        for block in msg.content:
-          if isinstance(block, TextBlock):
-            yield {
-              'type': 'text',
-              'text': block.text,
-            }
-          elif isinstance(block, ThinkingBlock):
-            yield {
-              'type': 'thinking',
-              'thinking': block.thinking,
-            }
-          elif isinstance(block, ToolUseBlock):
-            yield {
-              'type': 'tool_use',
-              'tool_id': block.id,
-              'tool_name': block.name,
-              'tool_input': block.input,
-            }
-          elif isinstance(block, ToolResultBlock):
-            yield {
-              'type': 'tool_result',
-              'tool_use_id': block.tool_use_id,
-              'content': block.content,
-              'is_error': block.is_error,
-            }
+    # Process messages from the queue
+    while True:
+      msg_type, msg = await asyncio.get_event_loop().run_in_executor(
+        None, result_queue.get
+      )
 
-      elif isinstance(msg, ResultMessage):
-        yield {
-          'type': 'result',
-          'session_id': msg.session_id,
-          'duration_ms': msg.duration_ms,
-          'total_cost_usd': msg.total_cost_usd,
-          'is_error': msg.is_error,
-          'num_turns': msg.num_turns,
-        }
+      if msg_type == 'done':
+        break
+      elif msg_type == 'error':
+        raise msg
+      elif msg_type == 'message':
+        # Handle different message types
+        if isinstance(msg, AssistantMessage):
+          # Process content blocks
+          for block in msg.content:
+            if isinstance(block, TextBlock):
+              yield {
+                'type': 'text',
+                'text': block.text,
+              }
+            elif isinstance(block, ThinkingBlock):
+              yield {
+                'type': 'thinking',
+                'thinking': block.thinking,
+              }
+            elif isinstance(block, ToolUseBlock):
+              yield {
+                'type': 'tool_use',
+                'tool_id': block.id,
+                'tool_name': block.name,
+                'tool_input': block.input,
+              }
+            elif isinstance(block, ToolResultBlock):
+              yield {
+                'type': 'tool_result',
+                'tool_use_id': block.tool_use_id,
+                'content': block.content,
+                'is_error': block.is_error,
+              }
 
-      elif isinstance(msg, SystemMessage):
-        yield {
-          'type': 'system',
-          'subtype': msg.subtype,
-          'data': msg.data if hasattr(msg, 'data') else None,
-        }
+        elif isinstance(msg, ResultMessage):
+          yield {
+            'type': 'result',
+            'session_id': msg.session_id,
+            'duration_ms': msg.duration_ms,
+            'total_cost_usd': msg.total_cost_usd,
+            'is_error': msg.is_error,
+            'num_turns': msg.num_turns,
+          }
 
-      elif isinstance(msg, UserMessage):
-        # Echo of user message, can skip or forward
-        pass
+        elif isinstance(msg, SystemMessage):
+          yield {
+            'type': 'system',
+            'subtype': msg.subtype,
+            'data': msg.data if hasattr(msg, 'data') else None,
+          }
 
-      elif isinstance(msg, StreamEvent):
-        # Raw stream event
-        yield {
-          'type': 'stream_event',
-          'event': msg.event,
-          'session_id': msg.session_id,
-        }
+        elif isinstance(msg, UserMessage):
+          # Echo of user message, can skip or forward
+          pass
+
+        elif isinstance(msg, StreamEvent):
+          # Raw stream event
+          yield {
+            'type': 'stream_event',
+            'event': msg.event,
+            'session_id': msg.session_id,
+          }
 
   except Exception as e:
     # Log full traceback for debugging

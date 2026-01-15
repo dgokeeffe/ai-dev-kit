@@ -80,6 +80,12 @@ def execute_databricks_command(
         - context_destroyed: Whether the context was destroyed
         - message: Helpful message about reusing the context
     """
+    # Convert empty strings to None (Claude agent sometimes passes "" instead of null)
+    if cluster_id == "":
+        cluster_id = None
+    if context_id == "":
+        context_id = None
+    
     try:
         result = _execute_databricks_command(
             code=code,
@@ -139,6 +145,12 @@ def run_python_file_on_databricks(
         - context_destroyed: Whether the context was destroyed
         - message: Helpful message about reusing the context
     """
+    # Convert empty strings to None (Claude agent sometimes passes "" instead of null)
+    if cluster_id == "":
+        cluster_id = None
+    if context_id == "":
+        context_id = None
+    
     try:
         result = _run_python_file_on_databricks(
             file_path=file_path,

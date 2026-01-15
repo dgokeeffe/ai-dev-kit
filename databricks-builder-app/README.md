@@ -2,17 +2,13 @@
 
 A web application that provides a Claude Code agent interface with integrated Databricks tools. Users interact with Claude through a chat interface, and the agent can execute SQL queries, manage pipelines, upload files, and more on their Databricks workspace.
 
-> **⚠️ Known Issue: SDK Bug Blocking MCP Server Integration**
+> **✅ Event Loop Fix Implemented**
 >
-> There is currently a bug in `claude-agent-sdk` ([issue #462](https://github.com/anthropics/claude-agent-sdk-python/issues/462)) that causes the subprocess transport to fail when using MCP servers in FastAPI/uvicorn contexts. The error manifests as:
+> We've implemented a workaround for `claude-agent-sdk` [issue #462](https://github.com/anthropics/claude-agent-sdk-python/issues/462) that was preventing the agent from executing Databricks tools in FastAPI contexts.
 >
-> ```
-> CLIConnectionError: ProcessTransport is not ready for writing
-> ```
+> **Solution:** The agent now runs in a fresh event loop in a separate thread, with `contextvars` properly copied to preserve Databricks authentication. See [EVENT_LOOP_FIX.md](./EVENT_LOOP_FIX.md) for details.
 >
-> **Status:** Waiting for upstream fix from Anthropic. The app is functional but agent invocations with Databricks tools will fail until this is resolved.
->
-> **Workaround attempted:** Running queries in separate threads with isolated event loops - did not resolve the issue as the bug is in the SDK's subprocess transport itself.
+> **Status:** ✅ Fully functional - agent can execute all Databricks tools successfully
 
 ## Architecture Overview
 
@@ -210,20 +206,53 @@ projects/
 
 - Python 3.11+
 - Node.js 18+
-- [uv](https://github.com/astral-sh/uv) package manager
-- Databricks workspace with SQL warehouse
-- PostgreSQL database (Lakebase) for persistence
+- [uv](https://github.com/astral-sh/uv) package manager (or pip)
+- Databricks workspace with:
+  - SQL warehouse (for SQL queries)
+  - Cluster (for Python/PySpark execution)
+  - Unity Catalog enabled (recommended)
+- PostgreSQL database (Lakebase) for project persistence
 
-### Environment Variables
+### Quick Start
 
-Copy `.env.example` to `.env.local` and configure:
+#### 1. Clone and Install Dependencies
 
 ```bash
-# Databricks configuration
-DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
-DATABRICKS_TOKEN=dapi...
+# Navigate to the app directory
+cd databricks-builder-app
 
-# PostgreSQL database (Lakebase) - required for persistence
+# Install backend dependencies
+uv sync
+# OR with pip: pip install -e .
+
+# Install sibling packages (from repo root)
+cd ..
+uv pip install -e databricks-tools-core -e databricks-mcp-server
+# OR: pip install -e databricks-tools-core -e databricks-mcp-server
+
+# Install frontend dependencies
+cd databricks-builder-app/client
+npm install
+cd ..
+```
+
+#### 2. Configure Environment Variables
+
+Create `.env.local` in the `databricks-builder-app` directory:
+
+```bash
+# Copy example
+cp .env.example .env.local
+```
+
+Edit `.env.local` with your configuration:
+
+```bash
+# Databricks Configuration (for local development)
+DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+DATABRICKS_TOKEN=dapi...  # Your personal access token
+
+# PostgreSQL Database (Lakebase) - Required for persistence
 LAKEBASE_PG_URL=postgresql://user:password@host:5432/database?sslmode=require
 LAKEBASE_PROJECT_ID=your-lakebase-project-id
 
@@ -232,24 +261,167 @@ PROJECTS_BASE_DIR=./projects
 
 # Environment mode
 ENV=development
+
+# Skills to load (comma-separated)
+ENABLED_SKILLS=databricks-python-sdk,spark-declarative-pipelines,synthetic-data-generation
 ```
 
-### Development
+**Getting your Databricks token:**
+1. Go to your Databricks workspace
+2. Click your username → User Settings
+3. Go to Access Tokens → Generate New Token
+4. Copy the token value
+
+#### 3. Configure Claude Settings (Optional - for Databricks Model Serving)
+
+If you're routing Claude API calls through Databricks Model Serving instead of directly to Anthropic, create `.claude/settings.json` in the **repository root** (not in the app directory):
 
 ```bash
-# Install dependencies
-uv sync
+# From repo root
+mkdir -p .claude
+```
 
-# Install sibling packages (MCP server)
-uv pip install -e ../databricks-tools-core -e ../databricks-mcp-server
+Create `.claude/settings.json`:
 
-# Start development servers (backend + frontend)
+```json
+{
+    "env": {
+        "ANTHROPIC_MODEL": "databricks-claude-sonnet-4-5",
+        "ANTHROPIC_BASE_URL": "https://your-workspace.cloud.databricks.com/serving-endpoints/anthropic",
+        "ANTHROPIC_AUTH_TOKEN": "dapi...",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "databricks-claude-opus-4-5",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "databricks-claude-sonnet-4-5"
+    }
+}
+```
+
+**Notes:**
+- `ANTHROPIC_AUTH_TOKEN` should be a Databricks Personal Access Token (PAT), not an Anthropic API key
+- `ANTHROPIC_BASE_URL` should point to your Databricks Model Serving endpoint
+- If this file doesn't exist, the app will use your Anthropic API key from the environment
+
+**⚠️ Important:** Add `.claude/settings.json` to `.gitignore` - it contains credentials!
+
+#### 4. Start the Development Servers
+
+**Option A: Use the start script (recommended)**
+
+```bash
 ./scripts/start_dev.sh
 ```
 
-This starts:
-- Backend: http://localhost:8000
-- Frontend: http://localhost:3000
+This starts both backend and frontend in one terminal.
+
+**Option B: Start separately**
+
+Terminal 1 (Backend):
+```bash
+uvicorn server.app:app --reload --port 8000 --reload-dir server
+```
+
+Terminal 2 (Frontend):
+```bash
+cd client
+npm run dev
+```
+
+#### 5. Access the App
+
+- **Frontend**: http://localhost:3000
+- **Backend**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
+
+### Configuration Details
+
+#### Databricks Authentication Modes
+
+The app supports two authentication modes:
+
+**1. Local Development (Environment Variables)**
+- Uses `DATABRICKS_HOST` and `DATABRICKS_TOKEN` from `.env.local`
+- All users share the same credentials
+- Good for local testing
+
+**2. Production (Request Headers)**
+- Uses `X-Forwarded-User` and `X-Forwarded-Access-Token` headers
+- Set automatically by Databricks Apps proxy
+- Each user has their own credentials
+- Proper multi-user isolation
+
+#### Skills Configuration
+
+Skills are loaded from `../databricks-skills/` and filtered by the `ENABLED_SKILLS` environment variable:
+
+- `databricks-python-sdk`: Patterns for using the Databricks Python SDK
+- `spark-declarative-pipelines`: SDP/DLT pipeline development
+- `synthetic-data-generation`: Creating test datasets
+- `build-databricks-app`: Building Databricks apps
+
+**Adding custom skills:**
+1. Create a new directory in `../databricks-skills/`
+2. Add a `SKILL.md` file with frontmatter:
+   ```markdown
+   ---
+   name: my-skill
+   description: "Description of the skill"
+   ---
+   
+   # Skill content here
+   ```
+3. Add the skill name to `ENABLED_SKILLS` in `.env.local`
+
+#### Database Setup
+
+The app uses PostgreSQL (Lakebase) for:
+- Project metadata
+- Conversation history
+- Message storage
+- Project backups (zipped project files)
+
+**Migrations:**
+```bash
+# Run migrations (done automatically on startup)
+alembic upgrade head
+
+# Create a new migration
+alembic revision --autogenerate -m "description"
+```
+
+### Troubleshooting
+
+#### "MCP connection unstable" or agent not executing tools
+
+This was a known issue with `claude-agent-sdk` in FastAPI contexts. We've implemented a fix:
+
+- ✅ Agent runs in a fresh event loop in a separate thread
+- ✅ Context variables (Databricks auth) are properly propagated
+- ✅ All MCP tools work correctly
+
+See [EVENT_LOOP_FIX.md](./EVENT_LOOP_FIX.md) for technical details.
+
+#### Skills not loading
+
+Check:
+1. `ENABLED_SKILLS` environment variable in `.env.local`
+2. Skill names match directory names in `../databricks-skills/`
+3. Each skill has a `SKILL.md` file with proper frontmatter
+4. Check logs: `Copied X skills to ./skills`
+
+#### Databricks authentication failing
+
+Check:
+1. `DATABRICKS_HOST` is correct (no trailing slash)
+2. `DATABRICKS_TOKEN` is valid and not expired
+3. Token has proper permissions (cluster access, SQL warehouse access, etc.)
+4. If using Databricks Model Serving, check `.claude/settings.json` configuration
+
+#### Port already in use
+
+```bash
+# Kill processes on ports 8000 and 3000
+lsof -ti:8000 | xargs kill -9
+lsof -ti:3000 | xargs kill -9
+```
 
 ### Production Build
 
