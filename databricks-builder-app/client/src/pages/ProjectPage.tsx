@@ -9,6 +9,7 @@ import {
   Loader2,
   MessageSquare,
   Send,
+  Square,
   Terminal,
   Wrench,
 } from 'lucide-react';
@@ -398,10 +399,20 @@ export default function ProjectPage() {
           if (type === 'conversation.created') {
             conversationId = event.conversation_id as string;
             fetchConversations(projectId).then(setConversations);
-          } else if (type === 'text') {
+          } else if (type === 'text_delta') {
+            // Token-by-token streaming - accumulate and display
             const text = event.text as string;
             fullText += text;
             setStreamingText(fullText);
+          } else if (type === 'text') {
+            // Complete text block - only use if we haven't received any deltas
+            // (fallback for when streaming is disabled)
+            if (!fullText) {
+              const text = event.text as string;
+              fullText = text;
+              setStreamingText(fullText);
+            }
+            // If we already have fullText from deltas, ignore this to avoid duplication
           } else if (type === 'thinking') {
             const thinking = event.thinking as string;
             setActivityItems((prev) => [
@@ -439,6 +450,9 @@ export default function ProjectPage() {
             ]);
           } else if (type === 'error') {
             toast.error(event.error as string);
+          } else if (type === 'cancelled') {
+            // Agent was cancelled by user - show a toast notification
+            toast.info('Generation stopped');
           }
         },
         onError: (error) => {
@@ -781,17 +795,23 @@ export default function ProjectPage() {
                 className="flex-1 resize-none rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] px-4 py-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]/50 focus:border-[var(--color-accent-primary)] disabled:cursor-not-allowed disabled:opacity-50 transition-all"
                 disabled={isStreaming}
               />
-              <Button
-                onClick={handleSendMessage}
-                disabled={!input.trim() || isStreaming}
-                className="h-12 w-12 rounded-xl"
-              >
-                {isStreaming ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
+              {isStreaming ? (
+                <Button
+                  onClick={() => abortControllerRef.current?.abort()}
+                  className="h-12 w-12 rounded-xl bg-red-600 hover:bg-red-700"
+                  title="Stop generation"
+                >
+                  <Square className="h-5 w-5" />
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={!input.trim()}
+                  className="h-12 w-12 rounded-xl"
+                >
                   <Send className="h-5 w-5" />
-                )}
-              </Button>
+                </Button>
+              )}
             </div>
             <p className="mt-2 text-xs text-[var(--color-text-muted)]">
               Press Enter to send, Shift+Enter for new line

@@ -1,5 +1,6 @@
 """Services module."""
 
+from .active_stream import ActiveStream, ActiveStreamManager, get_stream_manager
 from .agent import get_project_directory, stream_agent_response
 from .backup_manager import (
   mark_for_backup,
@@ -13,6 +14,8 @@ from .system_prompt import get_system_prompt
 from .user import get_current_user, get_workspace_url
 
 __all__ = [
+  'ActiveStream',
+  'ActiveStreamManager',
   'ConversationStorage',
   'ProjectStorage',
   'SkillNotFoundError',
@@ -21,6 +24,7 @@ __all__ = [
   'get_available_skills',
   'get_current_user',
   'get_project_directory',
+  'get_stream_manager',
   'get_system_prompt',
   'get_workspace_url',
   'list_clusters_async',

@@ -119,7 +119,7 @@ def get_project_directory(project_id: str) -> Path:
   return _ensure_project_directory(project_id)
 
 
-def _run_agent_in_fresh_loop(message, options, result_queue, context):
+def _run_agent_in_fresh_loop(message, options, result_queue, context, is_cancelled_fn):
   """Run agent in a fresh event loop (workaround for issue #462).
 
   This function runs in a separate thread with a fresh event loop to avoid
@@ -130,6 +130,7 @@ def _run_agent_in_fresh_loop(message, options, result_queue, context):
       options: ClaudeAgentOptions for the agent
       result_queue: Queue to send results back to the main thread
       context: Copy of contextvars context (for Databricks auth, etc.)
+      is_cancelled_fn: Callable that returns True if the request has been cancelled
 
   See: https://github.com/anthropics/claude-agent-sdk-python/issues/462
   """
@@ -145,6 +146,11 @@ def _run_agent_in_fresh_loop(message, options, result_queue, context):
 
       try:
         async for msg in query(prompt=prompt_generator(), options=options):
+          # Check for cancellation before processing each message
+          if is_cancelled_fn():
+            logger.info("Agent cancelled by user request")
+            result_queue.put(('cancelled', None))
+            return
           result_queue.put(('message', msg))
       except Exception as e:
         result_queue.put(('error', e))
@@ -171,6 +177,7 @@ async def stream_agent_response(
   workspace_folder: str | None = None,
   databricks_host: str | None = None,
   databricks_token: str | None = None,
+  is_cancelled_fn: callable = None,
 ) -> AsyncIterator[dict]:
   """Stream Claude agent response with all event types.
 
@@ -188,6 +195,7 @@ async def stream_agent_response(
       workspace_folder: Optional workspace folder for file uploads
       databricks_host: Databricks workspace URL for auth context
       databricks_token: User's Databricks access token for auth context
+      is_cancelled_fn: Optional callable that returns True if request is cancelled
 
   Yields:
       Event dicts with 'type' field for frontend consumption
@@ -232,15 +240,18 @@ async def stream_agent_response(
       system_prompt=system_prompt,  # Databricks-focused system prompt
       setting_sources=["user", "project"],  # Load Skills from filesystem
       env=claude_env,  # Pass Databricks auth settings (ANTHROPIC_AUTH_TOKEN, etc.)
+      include_partial_messages=True,  # Enable token-by-token streaming
     )
 
     # Run agent in fresh event loop to avoid subprocess transport issues (#462)
     # Copy the context to preserve contextvars (Databricks auth) in the new thread
     ctx = copy_context()
     result_queue = queue.Queue()
+    # Default to always-false if no cancellation function provided
+    cancel_check = is_cancelled_fn if is_cancelled_fn else lambda: False
     agent_thread = threading.Thread(
       target=_run_agent_in_fresh_loop,
-      args=(message, options, result_queue, ctx),
+      args=(message, options, result_queue, ctx, cancel_check),
       daemon=True
     )
     agent_thread.start()
@@ -252,6 +263,10 @@ async def stream_agent_response(
       )
 
       if msg_type == 'done':
+        break
+      elif msg_type == 'cancelled':
+        logger.info("Agent execution cancelled")
+        yield {'type': 'cancelled'}
         break
       elif msg_type == 'error':
         raise msg
@@ -303,16 +318,49 @@ async def stream_agent_response(
           }
 
         elif isinstance(msg, UserMessage):
-          # Echo of user message, can skip or forward
-          pass
+          # UserMessage can contain tool results (sent back to Claude after tool execution)
+          content = msg.content
+          if isinstance(content, list):
+            for block in content:
+              if isinstance(block, ToolResultBlock):
+                yield {
+                  'type': 'tool_result',
+                  'tool_use_id': block.tool_use_id,
+                  'content': block.content,
+                  'is_error': block.is_error,
+                }
+          # Skip string content (just echo of user input)
 
         elif isinstance(msg, StreamEvent):
-          # Raw stream event
-          yield {
-            'type': 'stream_event',
-            'event': msg.event,
-            'session_id': msg.session_id,
-          }
+          # Handle streaming events for token-by-token updates
+          event_data = msg.event
+          event_type = event_data.get('type', '')
+
+          # Handle text delta events (token streaming)
+          if event_type == 'content_block_delta':
+            delta = event_data.get('delta', {})
+            delta_type = delta.get('type', '')
+            if delta_type == 'text_delta':
+              text = delta.get('text', '')
+              if text:
+                yield {
+                  'type': 'text_delta',
+                  'text': text,
+                }
+            elif delta_type == 'thinking_delta':
+              thinking = delta.get('thinking', '')
+              if thinking:
+                yield {
+                  'type': 'thinking_delta',
+                  'thinking': thinking,
+                }
+          # Pass through other stream events if needed
+          elif event_type not in ('content_block_start', 'content_block_stop', 'message_start', 'message_delta', 'message_stop'):
+            yield {
+              'type': 'stream_event',
+              'event': event_data,
+              'session_id': msg.session_id,
+            }
 
   except Exception as e:
     # Log full traceback for debugging
