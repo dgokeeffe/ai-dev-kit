@@ -164,7 +164,6 @@ Claude now has both **skills** (knowledge) and **MCP tools** (actions) for Datab
 | [databricks-mcp-server](databricks-mcp-server/) | MCP server wrapping core functions as tools |
 | [databricks-skills](databricks-skills/) | Skills for Claude Code with patterns & examples |
 | [databricks-claude-test-project](databricks-claude-test-project/) | Test project for experimenting with MCP tools |
-| [databricks-exec-code-mcp](https://github.com/databricks-solutions/databricks-exec-code-mcp) |Template for testing code on clusters via Databricks Execution Command API| 
 
 ## Using the Core Library with Other Frameworks
 
@@ -248,7 +247,6 @@ This separation allows you to:
 - [databricks-tools-core README](databricks-tools-core/README.md) - Core library details, all functions
 - [databricks-mcp-server README](databricks-mcp-server/README.md) - Server configuration
 - [databricks-skills README](databricks-skills/README.md) - Skills installation and usage
-- [databricks-exec-code README](https://github.com/databricks-solutions/databricks-exec-code-mcp/blob/main/README.md) - Databricks Command Execution MCP implementation and usage
 
 ## Development
 
@@ -275,6 +273,8 @@ cd databricks-claude-test-project
 ./setup.sh   # Requires databricks-mcp-server setup first
 claude
 ```
+## Acknowledgments
+MCP Databricks Command Execution API from [databricks-exec-code](https://github.com/databricks-solutions/databricks-exec-code-mcp) by Natyra Bajraktari and Henryk Borzymowski.
 
 ## License
 
