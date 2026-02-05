@@ -245,10 +245,22 @@ databricks pipelines start-update --pipeline-id <id>
 
 When a user requests a new Lakeflow pipeline, Claude should detect the appropriate language from keywords in the prompt.
 
-### SQL Indicators (Default Choice)
+### CRITICAL: Explicit Language Requests
+
+**If the user explicitly mentions a language, use it without asking:**
+
+| User Says | Action |
+|-----------|--------|
+| "Python pipeline", "Python SDP", "use Python" | **Use Python immediately** |
+| "SQL pipeline", "SQL files", "use SQL" | **Use SQL immediately** |
+| "Python Spark Declarative Pipeline" | **Use Python immediately** |
+
+**DO NOT ask for clarification when the user explicitly states a language.** This is the most common mistake - ignoring an explicit language request.
+
+### SQL Indicators (Default Choice When Ambiguous)
 
 **Keywords:**
-- "SQL", "sql files", ".sql"
+- "sql files", ".sql"
 - "simple", "basic", "straightforward"
 - "aggregations", "joins", "transformations"
 - "materialized view", "CREATE OR REFRESH"
@@ -258,8 +270,9 @@ When a user requests a new Lakeflow pipeline, Claude should detect the appropria
 - User mentions only data transformations without complex logic
 - Request focuses on filtering, joining, aggregating data
 - No mention of custom functions or external integrations
+- **No explicit mention of "Python"**
 
-**Default Behavior**: Prefer SQL when ambiguous (covers 90% of use cases)
+**Default Behavior**: Prefer SQL only when ambiguous AND no Python indicators present
 
 ### Python Indicators
 
@@ -280,11 +293,10 @@ When a user requests a new Lakeflow pipeline, Claude should detect the appropria
 
 ### Ambiguous Cases (Ask User)
 
-**Indicators:**
-- Both SQL and Python keywords mentioned
-- "mixed pipeline", "some Python, some SQL"
-- "complex pipeline" without specifics
-- Unclear requirements or vague description
+**Only ask when ALL conditions are met:**
+- User did NOT explicitly mention "Python" or "SQL"
+- Mixed signals present (some SQL keywords, some Python keywords)
+- OR no clear indicators either way
 
 **Response:**
 ```
