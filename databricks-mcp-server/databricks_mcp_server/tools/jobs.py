@@ -108,7 +108,7 @@ def create_job(
             - spec: Dict with client (base environment version, defaults to "4" if omitted)
                     and dependencies (list of pip packages like "pandas==2.0.0")
             Example: [{
-                       "environment_key": "ml_env", 
+                       "environment_key": "ml_env",
                        "spec": {"client": "4", "dependencies": ["pandas==2.0.0", "scikit-learn"]}
                      }].
         tags: Optional tags dict for organization.

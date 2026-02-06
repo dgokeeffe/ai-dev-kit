@@ -147,7 +147,7 @@ def manage_uc_objects(
         object_type: "catalog", "schema", "volume", or "function"
         action: "create", "get", "list", "update", or "delete"
         name: Object name (for create)
-        full_name: Full qualified name (for get/update/delete). 
+        full_name: Full qualified name (for get/update/delete).
                    Format: "catalog" or "catalog.schema" or "catalog.schema.object".
         catalog_name: Parent catalog (for list schemas/volumes/functions, or create schema)
         schema_name: Parent schema (for list volumes/functions, or create volume)
@@ -227,8 +227,7 @@ def manage_uc_objects(
     elif otype == "function":
         if action == "create":
             return {
-                "error": 
-                """Functions cannot be created via SDK. Use manage_uc_security_policies tool with 
+                "error": """Functions cannot be created via SDK. Use manage_uc_security_policies tool with 
                 action='create_security_function' or execute_sql with a CREATE FUNCTION statement."""
             }
         elif action == "get":

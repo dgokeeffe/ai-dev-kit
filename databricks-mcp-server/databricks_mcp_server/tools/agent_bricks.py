@@ -363,8 +363,7 @@ def create_or_update_mas(
         agent_type_count = sum([has_endpoint, has_genie, has_ka])
         if agent_type_count > 1:
             return {
-                "error": 
-                f"""Agent '{agent_name}' has multiple agent types. 
+                "error": f"""Agent '{agent_name}' has multiple agent types. 
                 Provide only one of: 'endpoint_name', 'genie_space_id', or 'ka_tile_id'."""
             }
         if agent_type_count == 0:

@@ -397,8 +397,7 @@ def get_trace_metrics(
     """
     # Check if source looks like a file path
     if isinstance(source, Path) or (
-        isinstance(source, str)
-        and (source.endswith(".jsonl") or source.startswith(("/", "~", ".")))
+        isinstance(source, str) and (source.endswith(".jsonl") or source.startswith(("/", "~", ".")))
     ):
         path = Path(source).expanduser()
         if not path.exists():
