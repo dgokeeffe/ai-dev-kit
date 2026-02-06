@@ -1,4 +1,5 @@
 """Jobs tools - Manage Databricks jobs and job runs."""
+
 from typing import Any, Dict, List
 
 from databricks_tools_core.jobs import (
@@ -106,7 +107,10 @@ def create_job(
             - environment_key: Unique identifier (referenced by tasks via environment_key)
             - spec: Dict with client (base environment version, defaults to "4" if omitted)
                     and dependencies (list of pip packages like "pandas==2.0.0")
-            Example: [{"environment_key": "ml_env", "spec": {"client": "4", "dependencies": ["pandas==2.0.0", "scikit-learn"]}}]
+            Example: [{
+                       "environment_key": "ml_env", 
+                       "spec": {"client": "4", "dependencies": ["pandas==2.0.0", "scikit-learn"]}
+                     }].
         tags: Optional tags dict for organization.
         timeout_seconds: Job-level timeout (0 means no timeout).
         max_concurrent_runs: Maximum number of concurrent runs (default: 1).
