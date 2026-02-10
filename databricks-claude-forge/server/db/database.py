@@ -342,22 +342,23 @@ def init_database(database_url: Optional[str] = None) -> AsyncEngine:
                 f'Failed to generate initial Lakebase token for instance: {instance_name}'
             )
 
-        # Get username: LAKEBASE_USERNAME (explicit), else PGUSER (set by Apps when Lakebase
-        # resource is linked - service principal client ID), else current user from SDK. Must
-        # match the principal granted table permissions via grant_lakebase_permissions.sh.
+        # Get username: LAKEBASE_USERNAME (explicit), else PGUSER, else DATABRICKS_CLIENT_ID
+        # (auto-set by Databricks Apps to the service principal's client ID), else current user
+        # from SDK. Must match the principal granted table permissions.
         username = (
             os.environ.get('LAKEBASE_USERNAME')
             or os.environ.get('PGUSER')
+            or os.environ.get('DATABRICKS_CLIENT_ID')
             or _get_current_user_email()
             or instance_name
         )
-        if not os.environ.get('LAKEBASE_USERNAME') and not os.environ.get('PGUSER'):
-            logger.warning(
-                'LAKEBASE_USERNAME and PGUSER not set; DB user may not match service principal. '
-                'Set LAKEBASE_USERNAME in app.yaml to service_principal_client_id '
-                '(databricks apps get <app> -o json | jq -r .service_principal_client_id) '
-                'and run ./scripts/grant_lakebase_permissions.sh <app-name> after every deploy.'
-            )
+        used_auto_client_id = (
+            not os.environ.get('LAKEBASE_USERNAME')
+            and not os.environ.get('PGUSER')
+            and os.environ.get('DATABRICKS_CLIENT_ID')
+        )
+        if used_auto_client_id:
+            logger.info(f'Using DATABRICKS_CLIENT_ID as Lakebase username: {username}')
 
         # Resolve hostname for DNS workaround (macOS Python DNS issues with long hostnames)
         global _resolved_hostaddr
