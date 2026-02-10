@@ -60,7 +60,7 @@ function ActivitySection({
 
   return (
     <div className="mb-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-      <Wrench className="h-3 w-3 text-blue-500 animate-pulse" />
+      <Wrench className="h-3 w-3 text-[var(--color-accent-primary)] animate-pulse" />
       <span className="truncate">
         Using {currentTool.toolName?.replace('mcp__databricks__', '')}...
       </span>
@@ -702,7 +702,7 @@ export default function ProjectPage() {
                         <>
                           <span className={cn(
                             'w-2 h-2 rounded-full',
-                            selected.state === 'RUNNING' ? 'bg-green-500' : 'bg-gray-400'
+                            selected.state === 'RUNNING' ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'
                           )} />
                           <span className="max-w-[100px] truncate">{selected.cluster_name}</span>
                         </>
@@ -729,7 +729,7 @@ export default function ProjectPage() {
                       >
                         <span className={cn(
                           'w-2 h-2 rounded-full flex-shrink-0',
-                          cluster.state === 'RUNNING' ? 'bg-green-500' : 'bg-gray-400'
+                          cluster.state === 'RUNNING' ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'
                         )} />
                         <span className="truncate text-[var(--color-text-primary)]">{cluster.cluster_name}</span>
                       </button>
@@ -762,7 +762,7 @@ export default function ProjectPage() {
                         <>
                           <span className={cn(
                             'w-2 h-2 rounded-full',
-                            selected.state === 'RUNNING' ? 'bg-green-500' : 'bg-gray-400'
+                            selected.state === 'RUNNING' ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'
                           )} />
                           <span className="max-w-[100px] truncate">{selected.warehouse_name}</span>
                         </>
@@ -789,7 +789,7 @@ export default function ProjectPage() {
                       >
                         <span className={cn(
                           'w-2 h-2 rounded-full flex-shrink-0',
-                          warehouse.state === 'RUNNING' ? 'bg-green-500' : 'bg-gray-400'
+                          warehouse.state === 'RUNNING' ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'
                         )} />
                         <span className="truncate text-[var(--color-text-primary)]">{warehouse.warehouse_name}</span>
                       </button>
@@ -993,7 +993,7 @@ export default function ProjectPage() {
               {isStreaming ? (
                 <Button
                   onClick={() => abortControllerRef.current?.abort()}
-                  className="h-12 w-12 rounded-xl bg-red-600 hover:bg-red-700"
+                  className="h-12 w-12 rounded-xl bg-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/90"
                   title="Stop generation"
                 >
                   <Square className="h-5 w-5" />

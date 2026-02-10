@@ -138,7 +138,7 @@ function Toggle({
       }}
       className={cn(
         'relative inline-flex h-4 w-7 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-primary)]/50 focus:ring-offset-1',
-        checked ? 'bg-[var(--color-accent-primary)]' : 'bg-gray-400/50',
+        checked ? 'bg-[var(--color-accent-primary)]' : 'bg-[var(--color-text-muted)]/50',
         disabled && 'opacity-50 cursor-not-allowed'
       )}
     >
@@ -448,7 +448,7 @@ export function SkillsExplorer({
               <button
                 onClick={handleReloadSkills}
                 disabled={isReloading}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[10px] font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[10px] font-medium bg-[var(--color-accent-primary)] text-white hover:bg-[var(--color-accent-secondary)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
               >
                 <RefreshCw className={cn('h-3 w-3 flex-shrink-0', isReloading && 'animate-spin')} />
                 <span>{isReloading ? 'Reloading...' : 'Reload'}</span>
