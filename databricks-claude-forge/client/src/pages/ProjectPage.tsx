@@ -79,11 +79,21 @@ export default function ProjectPage() {
   const [fileCache, setFileCache] = useState<Map<string, { content: string; timestamp: number }>>(new Map());
 
   // State - IDE Layout
+  // Load panel sizes from localStorage on initial render
   const [activeActivity, setActiveActivity] = useState<ActivityType | null>('explorer');
-  const [leftSidebarWidth, setLeftSidebarWidth] = useState(200);
-  const [rightSidebarWidth, setRightSidebarWidth] = useState(450);
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem('panel-leftSidebarWidth');
+    return saved ? parseInt(saved, 10) : 200;
+  });
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem('panel-rightSidebarWidth');
+    return saved ? parseInt(saved, 10) : 450;
+  });
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
-  const [bottomPanelHeight, setBottomPanelHeight] = useState(300);
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(() => {
+    const saved = localStorage.getItem('panel-bottomPanelHeight');
+    return saved ? parseInt(saved, 10) : 300;
+  });
   const [isBottomPanelOpen, setIsBottomPanelOpen] = useState(false);
   const [bottomPanelTab, setBottomPanelTab] = useState<BottomPanelTab>('terminal');
   const [outputLines] = useState<OutputLine[]>([]);
@@ -99,6 +109,19 @@ export default function ProjectPage() {
   // State - Command palette & Quick open
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isQuickOpenOpen, setIsQuickOpenOpen] = useState(false);
+
+  // Persist panel sizes to localStorage
+  useEffect(() => {
+    localStorage.setItem('panel-leftSidebarWidth', String(leftSidebarWidth));
+  }, [leftSidebarWidth]);
+
+  useEffect(() => {
+    localStorage.setItem('panel-rightSidebarWidth', String(rightSidebarWidth));
+  }, [rightSidebarWidth]);
+
+  useEffect(() => {
+    localStorage.setItem('panel-bottomPanelHeight', String(bottomPanelHeight));
+  }, [bottomPanelHeight]);
 
   // Computed values
   const userDefaultSchema = useMemo(() => toSchemaName(user, project?.name ?? null), [user, project?.name]);

@@ -22,5 +22,34 @@ export default defineConfig({
     outDir: 'out',
     sourcemap: false,
     chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-codemirror-core': [
+            'codemirror',
+            '@codemirror/autocomplete',
+            '@codemirror/commands',
+            '@codemirror/state',
+            '@codemirror/view',
+            '@codemirror/theme-one-dark',
+            '@codemirror/search',
+            '@codemirror/lint',
+          ],
+          'vendor-codemirror-langs': [
+            '@codemirror/lang-javascript',
+            '@codemirror/lang-python',
+            '@codemirror/lang-json',
+            '@codemirror/lang-markdown',
+            '@codemirror/lang-sql',
+            '@codemirror/lang-yaml',
+            '@codemirror/lang-css',
+            '@codemirror/lang-html',
+          ],
+          'vendor-xterm': ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
+          'vendor-markdown': ['react-markdown', 'react-syntax-highlighter', 'remark-gfm'],
+        },
+      },
+    },
   },
 });
