@@ -1,0 +1,687 @@
+# Databricks Builder App
+
+A web application that provides a Claude Code agent interface with integrated Databricks tools. Users interact with Claude through a chat interface, and the agent can execute SQL queries, manage pipelines, upload files, and more on their Databricks workspace.
+
+> **✅ Event Loop Fix Implemented**
+>
+> We've implemented a workaround for `claude-agent-sdk` [issue #462](https://github.com/anthropics/claude-agent-sdk-python/issues/462) that was preventing the agent from executing Databricks tools in FastAPI contexts.
+>
+> **Solution:** The agent now runs in a fresh event loop in a separate thread, with `contextvars` properly copied to preserve Databricks authentication. See [EVENT_LOOP_FIX.md](./EVENT_LOOP_FIX.md) for details.
+>
+> **Status:** ✅ Fully functional - agent can execute all Databricks tools successfully
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Web Application                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  React Frontend (client/)           FastAPI Backend (server/)               │
+│  ┌─────────────────────┐            ┌─────────────────────────────────┐     │
+│  │ Chat UI             │◄──────────►│ /api/agent/invoke               │     │
+│  │ Project Selector    │   SSE      │ /api/projects                   │     │
+│  │ Conversation List   │            │ /api/conversations              │     │
+│  └─────────────────────┘            └─────────────────────────────────┘     │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                             │
+                                             ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           Claude Code Session                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Each user message spawns a Claude Code agent session via claude-agent-sdk  │
+│                                                                              │
+│  Built-in Tools:              MCP Tools (Databricks):         Skills:       │
+│  ┌──────────────────┐         ┌─────────────────────────┐    ┌───────────┐  │
+│  │ Read, Write, Edit│         │ execute_sql             │    │ sdp       │  │
+│  │ Bash, Glob, Grep │         │ create_or_update_pipeline    │ dabs      │  │
+│  │ Skill            │         │ upload_folder           │    │ sdk       │  │
+│  └──────────────────┘         │ run_python_file         │    │ ...       │  │
+│                               │ ...                     │    └───────────┘  │
+│                               └─────────────────────────┘                   │
+│                                          │                                  │
+│                                          ▼                                  │
+│                               ┌─────────────────────────┐                   │
+│                               │ databricks-mcp-server   │                   │
+│                               │ (stdio subprocess)      │                   │
+│                               └─────────────────────────┘                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                             │
+                                             ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            Databricks Workspace                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  SQL Warehouses    │    Clusters    │    Unity Catalog    │    Workspace    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## How It Works
+
+### 1. Claude Code Sessions
+
+When a user sends a message, the backend creates a Claude Code session using the `claude-agent-sdk`:
+
+```python
+from claude_agent_sdk import ClaudeAgentOptions, query
+
+options = ClaudeAgentOptions(
+    cwd=str(project_dir),           # Project working directory
+    allowed_tools=allowed_tools,     # Built-in + MCP tools
+    permission_mode='acceptEdits',   # Auto-accept file edits
+    resume=session_id,               # Resume previous conversation
+    mcp_servers=mcp_servers,         # Databricks MCP server config
+    system_prompt=system_prompt,     # Databricks-focused prompt
+    setting_sources=['project'],     # Load skills from .claude/skills
+)
+
+async for msg in query(prompt=message, options=options):
+    yield msg  # Stream to frontend
+```
+
+Key features:
+- **Session Resumption**: Each conversation stores a `claude_session_id` for context continuity
+- **Streaming**: All events (text, thinking, tool_use, tool_result) stream to the frontend in real-time
+- **Project Isolation**: Each project has its own working directory with sandboxed file access
+
+### 2. Authentication Flow
+
+The app supports multi-user authentication using per-request credentials:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Authentication Flow                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Production (Databricks Apps)         Development (Local)                   │
+│  ┌──────────────────────────┐         ┌──────────────────────────┐          │
+│  │ Request Headers:         │         │ Environment Variables:   │          │
+│  │ X-Forwarded-User         │         │ DATABRICKS_HOST          │          │
+│  │ X-Forwarded-Access-Token │         │ DATABRICKS_TOKEN         │          │
+│  └────────────┬─────────────┘         └────────────┬─────────────┘          │
+│               │                                    │                        │
+│               └──────────────┬─────────────────────┘                        │
+│                              ▼                                              │
+│               ┌──────────────────────────┐                                  │
+│               │ set_databricks_auth()    │  (contextvars)                   │
+│               │ - host                   │                                  │
+│               │ - token                  │                                  │
+│               └────────────┬─────────────┘                                  │
+│                            ▼                                                │
+│               ┌──────────────────────────┐                                  │
+│               │ get_workspace_client()   │  (used by all tools)             │
+│               │ - Returns client with    │                                  │
+│               │   context credentials    │                                  │
+│               └──────────────────────────┘                                  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**How it works:**
+
+1. **Request arrives** - The FastAPI backend extracts credentials:
+   - **Production**: `X-Forwarded-User` and `X-Forwarded-Access-Token` headers (set by Databricks Apps proxy)
+   - **Development**: Falls back to `DATABRICKS_HOST` and `DATABRICKS_TOKEN` env vars
+
+2. **Auth context set** - Before invoking the agent:
+   ```python
+   from databricks_tools_core.auth import set_databricks_auth, clear_databricks_auth
+
+   set_databricks_auth(workspace_url, user_token)
+   try:
+       # All tool calls use this user's credentials
+       async for event in stream_agent_response(...):
+           yield event
+   finally:
+       clear_databricks_auth()
+   ```
+
+3. **Tools use context** - All Databricks tools call `get_workspace_client()` which:
+   - First checks contextvars for per-request credentials
+   - Falls back to environment variables if no context set
+
+This ensures each user's requests use their own Databricks credentials, enabling proper access control and audit logging.
+
+### 3. MCP Integration (Databricks Tools)
+
+Databricks tools are loaded in-process using the Claude Agent SDK's MCP server feature:
+
+```python
+from claude_agent_sdk import tool, create_sdk_mcp_server
+
+# Tools are dynamically loaded from databricks-mcp-server
+server = create_sdk_mcp_server(name='databricks', tools=sdk_tools)
+
+options = ClaudeAgentOptions(
+    mcp_servers={'databricks': server},
+    allowed_tools=['mcp__databricks__execute_sql', ...],
+)
+```
+
+Tools are exposed as `mcp__databricks__<tool_name>` and include:
+- SQL execution (`execute_sql`, `execute_sql_multi`)
+- Warehouse management (`list_warehouses`, `get_best_warehouse`)
+- Cluster execution (`execute_databricks_command`, `run_python_file_on_databricks`)
+- Pipeline management (`create_or_update_pipeline`, `start_update`, etc.)
+- File operations (`upload_file`, `upload_folder`)
+
+### 4. Skills System
+
+Skills provide specialized guidance for Databricks development tasks. They are markdown files with instructions and examples that Claude can load on demand.
+
+**Skill loading flow:**
+1. On startup, skills are copied from `../databricks-skills/` to `./skills/`
+2. When a project is created, skills are copied to `project/.claude/skills/`
+3. The agent can invoke skills using the `Skill` tool: `skill: "sdp"`
+
+Skills include:
+- **asset-bundles**: Databricks Asset Bundles configuration
+- **databricks-app-apx**: Full-stack apps with APX framework (FastAPI + React)
+- **databricks-app-python**: Python apps with Dash, Streamlit, Flask
+- **databricks-python-sdk**: Python SDK patterns
+- **mlflow-evaluation**: MLflow evaluation and trace analysis
+- **spark-declarative-pipelines**: Spark Declarative Pipelines (SDP) development
+- **synthetic-data-generation**: Creating test datasets
+
+### 5. Project Persistence
+
+Projects are stored in the local filesystem with automatic backup to PostgreSQL:
+
+```
+projects/
+  <project-uuid>/
+    .claude/
+      skills/        # Copied skills for this project
+    src/             # User's code files
+    ...
+```
+
+**Backup system:**
+- After each agent interaction, the project is marked for backup
+- A background worker runs every 10 minutes
+- Projects are zipped and stored in PostgreSQL (Lakebase)
+- On access, missing projects are restored from backup
+
+## Setup
+
+### Prerequisites
+
+- Python 3.11+
+- Node.js 18+
+- [uv](https://github.com/astral-sh/uv) package manager (or pip)
+- Databricks workspace with:
+  - SQL warehouse (for SQL queries)
+  - Cluster (for Python/PySpark execution)
+  - Unity Catalog enabled (recommended)
+- PostgreSQL database (Lakebase) for project persistence
+
+### Quick Start
+
+#### 1. Clone and Install Dependencies
+
+```bash
+# Navigate to the app directory
+cd databricks-builder-app
+
+# Install backend dependencies
+uv sync
+# OR with pip: pip install -e .
+
+# Install sibling packages (from repo root)
+cd ..
+uv pip install -e databricks-tools-core -e databricks-mcp-server
+# OR: pip install -e databricks-tools-core -e databricks-mcp-server
+
+# Install frontend dependencies
+cd databricks-builder-app/client
+npm install
+cd ..
+```
+
+#### 2. Configure Environment Variables
+
+Create `.env.local` in the `databricks-builder-app` directory:
+
+```bash
+# Copy example
+cp .env.example .env.local
+```
+
+Edit `.env.local` with your configuration:
+
+```bash
+# Databricks Configuration (for local development)
+DATABRICKS_HOST=https://your-workspace.cloud.databricks.com
+DATABRICKS_TOKEN=dapi...  # Your personal access token
+
+# PostgreSQL Database (Lakebase) - Required for persistence
+LAKEBASE_PG_URL=postgresql://user:password@host:5432/database?sslmode=require
+LAKEBASE_PROJECT_ID=your-lakebase-project-id
+
+# Projects directory (where agent works)
+PROJECTS_BASE_DIR=./projects
+
+# Environment mode
+ENV=development
+
+# Skills to load (comma-separated)
+ENABLED_SKILLS=spark-declarative-pipelines,synthetic-data-generation
+```
+
+**Getting your Databricks token:**
+1. Go to your Databricks workspace
+2. Click your username → User Settings
+3. Go to Access Tokens → Generate New Token
+4. Copy the token value
+
+#### 3. Configure Claude Settings (Optional - for Databricks Model Serving)
+
+If you're routing Claude API calls through Databricks Model Serving instead of directly to Anthropic, create `.claude/settings.json` in the **repository root** (not in the app directory):
+
+```bash
+# From repo root
+mkdir -p .claude
+```
+
+Create `.claude/settings.json`:
+
+```json
+{
+    "env": {
+        "ANTHROPIC_MODEL": "databricks-claude-sonnet-4-5",
+        "ANTHROPIC_BASE_URL": "https://your-workspace.cloud.databricks.com/serving-endpoints/anthropic",
+        "ANTHROPIC_AUTH_TOKEN": "dapi...",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "databricks-claude-opus-4-5",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "databricks-claude-sonnet-4-5"
+    }
+}
+```
+
+**Notes:**
+- `ANTHROPIC_AUTH_TOKEN` should be a Databricks Personal Access Token (PAT), not an Anthropic API key
+- `ANTHROPIC_BASE_URL` should point to your Databricks Model Serving endpoint
+- If this file doesn't exist, the app will use your Anthropic API key from the environment
+
+**⚠️ Important:** Add `.claude/settings.json` to `.gitignore` - it contains credentials!
+
+#### 4. Start the Development Servers
+
+**Option A: Use the start script (recommended)**
+
+```bash
+./scripts/start_dev.sh
+```
+
+This starts both backend and frontend in one terminal.
+
+**Option B: Start separately**
+
+Terminal 1 (Backend):
+```bash
+uvicorn server.app:app --reload --port 8000 --reload-dir server
+```
+
+Terminal 2 (Frontend):
+```bash
+cd client
+npm run dev
+```
+
+#### 5. Access the App
+
+- **Frontend**: http://localhost:3000
+- **Backend**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
+
+### Configuration Details
+
+#### Databricks Authentication Modes
+
+The app supports two authentication modes:
+
+**1. Local Development (Environment Variables)**
+- Uses `DATABRICKS_HOST` and `DATABRICKS_TOKEN` from `.env.local`
+- All users share the same credentials
+- Good for local testing
+
+**2. Production (Request Headers)**
+- Uses `X-Forwarded-User` and `X-Forwarded-Access-Token` headers
+- Set automatically by Databricks Apps proxy
+- Each user has their own credentials
+- Proper multi-user isolation
+
+#### Skills Configuration
+
+Skills are loaded from `../databricks-skills/` and filtered by the `ENABLED_SKILLS` environment variable:
+
+- `databricks-python-sdk`: Patterns for using the Databricks Python SDK
+- `spark-declarative-pipelines`: SDP/DLT pipeline development
+- `synthetic-data-generation`: Creating test datasets
+- `build-databricks-app`: Building Databricks apps
+
+**Adding custom skills:**
+1. Create a new directory in `../databricks-skills/`
+2. Add a `SKILL.md` file with frontmatter:
+   ```markdown
+   ---
+   name: my-skill
+   description: "Description of the skill"
+   ---
+   
+   # Skill content here
+   ```
+3. Add the skill name to `ENABLED_SKILLS` in `.env.local`
+
+#### Database Setup
+
+The app uses PostgreSQL (Lakebase) for:
+- Project metadata
+- Conversation history
+- Message storage
+- Project backups (zipped project files)
+
+**Migrations:**
+```bash
+# Run migrations (done automatically on startup)
+alembic upgrade head
+
+# Create a new migration
+alembic revision --autogenerate -m "description"
+```
+
+### Troubleshooting
+
+#### "failed to update app" when running `databricks bundle deploy -t dev`
+
+If your app already uses a specific Lakebase instance (e.g. `daveok`), deploy with that instance so Terraform does not try to change it:
+
+```bash
+databricks bundle deploy -t dev --var="lakebase_instance_name=daveok"
+```
+
+#### "permission denied for table projects" (or other tables) after deploy
+
+The app connects to Lakebase as one DB user (the app's service principal). That user must have table permissions. **After every deploy**, run:
+
+```bash
+./scripts/grant_lakebase_permissions.sh databricks-builder-app daveok
+```
+
+(Use your app name and Lakebase instance name.)
+
+- When the app has a Lakebase resource, the platform may set **PGUSER** to the service principal client ID; the app uses that automatically.
+- Otherwise set **LAKEBASE_USERNAME** in app.yaml to the service principal:  
+  `databricks apps get databricks-builder-app -o json | jq -r .service_principal_client_id`
+
+#### "Update Database Catalog is not yet implemented"
+
+The bundle does not include the `database_catalog` resource because the Databricks provider does not support updating it. Create the Unity Catalog catalog for your Lakebase instance manually once if needed (Lakebase UI or SQL).
+
+#### Debugging auth (403) when logs are hard to see
+
+When the app runs on Databricks Apps, backend logs can be hard to access. Use these to debug 403 / missing-token issues:
+
+1. **Auth debug endpoint (no secrets)**  
+   In the browser or from curl, call:
+   ```http
+   GET /api/config/debug-auth
+   ```
+   Response shows what the app sees: `has_forwarded_user`, `has_forwarded_token`, `workspace_url_set`, `oauth_creds_in_env`, and `hints` (e.g. "Token missing. Ensure the app proxy forwards X-Forwarded-Access-Token..."). Use this to confirm whether the proxy is forwarding headers.
+
+2. **Grep-friendly logs**  
+   When the agent or PTY is used, the server logs a single line you can search for:
+   ```text
+   AUTH_DEBUG agent env=production user_present=1 token_present=0 workspace_url_set=1
+   AUTH_DEBUG pty env=production user_present=1 token_present=0 host_set=1
+   ```
+   If you can get any log stream, search for `AUTH_DEBUG` to see auth state without digging through full logs.
+
+3. **Optional PAT fallback (debugging only)**  
+   If the proxy does not forward `X-Forwarded-Access-Token`, you can temporarily use a PAT from [Unity Catalog / workspace secrets](https://docs.databricks.com/aws/en/security/secrets/):
+   - Run `./scripts/setup_pat_secret.sh` to create the `builder-app-pat` scope and store your PAT (prompts, or use `DATABRICKS_TOKEN` env var).
+   - In the app UI: Configure > Add resource > Secret (scope: builder-app-pat, key: databricks_token, resource key: databricks-token).
+   - In `app.yaml`, uncomment the PAT fallback env block (USE_PAT_FALLBACK=1 and DATABRICKS_TOKEN valueFrom), then redeploy.
+   The app will log: `Production: using PAT fallback (USE_PAT_FALLBACK=1). For debugging only.`  
+   Use only for debugging; remove `USE_PAT_FALLBACK` and fix proxy forwarding for production.
+
+#### "MCP connection unstable" or agent not executing tools
+
+This was a known issue with `claude-agent-sdk` in FastAPI contexts. We've implemented a fix:
+
+- ✅ Agent runs in a fresh event loop in a separate thread
+- ✅ Context variables (Databricks auth) are properly propagated
+- ✅ All MCP tools work correctly
+
+See [EVENT_LOOP_FIX.md](./EVENT_LOOP_FIX.md) for technical details.
+
+#### Skills not loading
+
+Check:
+1. `ENABLED_SKILLS` environment variable in `.env.local`
+2. Skill names match directory names in `../databricks-skills/`
+3. Each skill has a `SKILL.md` file with proper frontmatter
+4. Check logs: `Copied X skills to ./skills`
+
+#### "permission denied for table projects" (Lakebase)
+
+The app connects to Lakebase as a Postgres user. If that user doesn't have table privileges, you get this error. Fix it by using the app's **service principal** as the DB user and granting it table permissions.
+
+1. **Set LAKEBASE_USERNAME in app.yaml** to the app's service principal client ID so the app uses one DB user:
+   ```yaml
+   - name: LAKEBASE_USERNAME
+     value: "1e02dfbd-e494-4329-8eb4-2c85373754f5"   # get via: databricks apps get databricks-builder-app -o json | jq -r .service_principal_client_id
+   ```
+2. **Grant table permissions to that user** – run the SQL as a user that owns the tables (e.g. in Databricks: Lakebase > your instance > SQL editor):
+   ```sql
+   GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "1e02dfbd-e494-4329-8eb4-2c85373754f5";
+   GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "1e02dfbd-e494-4329-8eb4-2c85373754f5";
+   GRANT USAGE, CREATE ON SCHEMA public TO "1e02dfbd-e494-4329-8eb4-2c85373754f5";
+   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "1e02dfbd-e494-4329-8eb4-2c85373754f5";
+   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "1e02dfbd-e494-4329-8eb4-2c85373754f5";
+   ```
+   Replace the UUID with your app's service principal client ID if different. See `scripts/grant_lakebase_permissions.sh` and `scripts/grant_lakebase_permissions.sql.example`.
+
+3. **Redeploy the app** so it picks up the new `LAKEBASE_USERNAME` (or restart the app).
+
+#### Databricks authentication failing
+
+Check:
+1. `DATABRICKS_HOST` is correct (no trailing slash)
+2. `DATABRICKS_TOKEN` is valid and not expired
+3. Token has proper permissions (cluster access, SQL warehouse access, etc.)
+4. If using Databricks Model Serving, check `.claude/settings.json` configuration
+
+#### Port already in use
+
+```bash
+# Kill processes on ports 8000 and 3000
+lsof -ti:8000 | xargs kill -9
+lsof -ti:3000 | xargs kill -9
+```
+
+#### "Instance name is not unique" when deploying with DAB
+
+When using `databricks bundle deploy -t existing -var="lakebase_instance_name=<name>"`, Terraform tries to **create** a Lakebase instance. If an instance with that name already exists (e.g. from a previous deploy or created manually), you get this error.
+
+**Fix:** Bind the bundle's database resource to the existing instance, then deploy again:
+
+```bash
+# Use the same instance name as in your -var
+INSTANCE_NAME="builder-app-db"   # or daveok, etc.
+
+databricks bundle deployment bind builder_db "$INSTANCE_NAME" -t existing --auto-approve
+databricks bundle deploy -t existing -var="lakebase_instance_name=$INSTANCE_NAME"
+```
+
+If bind reports "Resource already managed by Terraform", the DB is already in state – just run the deploy command.
+
+### Deploy with Databricks Asset Bundle (DAB)
+
+Deploy the Builder App to the Databricks Apps platform so users can run it from your workspace. The flow is: **prep** (build frontend, copy packages/skills) then **deploy** (upload and provision resources via the bundle).
+
+#### Deploy for real (quick checklist)
+
+1. **Use the full ai-dev-kit repo** – Sibling packages must be present: `databricks-tools-core`, `databricks-mcp-server`, `databricks-skills` (same parent as `databricks-builder-app`). If you only cloned the app, clone the full repo instead.
+2. **Authenticate** – `databricks auth login` (or set `DATABRICKS_HOST` and token).
+3. **App config (first-time)** – The bundle sync includes `app.yaml`. If it doesn’t exist, copy from `app.yaml.example` and adjust env/Lakebase if needed.
+4. **Prep** – From `databricks-builder-app`:  
+   `./scripts/deploy.sh --prep-only`
+5. **Deploy** – From `databricks-builder-app`:  
+   `databricks bundle deploy -t dev`  
+   Or use an existing Lakebase instance:  
+   `databricks bundle deploy -t existing -var="lakebase_instance_name=<name>"`
+
+All commands below assume you are in `databricks-builder-app` (or run the script as `./databricks-builder-app/scripts/deploy.sh --prep-only` from the repo root).
+
+#### Prerequisites
+
+- **Databricks CLI** configured: `databricks auth login` (or set `DATABRICKS_HOST` / token).
+- **Full ai-dev-kit repo** – `databricks-builder-app` must sit next to `databricks-tools-core`, `databricks-mcp-server`, and `databricks-skills` (the prep script copies from the parent directory).
+- **app.yaml** – Required by bundle sync. Copy from `app.yaml.example` if missing; customize env vars and Lakebase instance name if needed.
+
+#### What gets deployed
+
+- **Lakebase database instance** (CU_1) for app persistence.
+- **Unity Catalog catalog** and database (PostgreSQL) for projects and conversations.
+- **Databricks App** with Lakebase and Foundation Model (Claude) resources.
+
+See `databricks.yml` for full bundle configuration and variables.
+
+#### Step 1: Prep
+
+Build the frontend and copy sibling packages and skills into the app so the bundle can sync them:
+
+```bash
+cd databricks-builder-app
+./scripts/deploy.sh --prep-only
+```
+
+This will:
+
+- Run `npm run build` in `client/` (output in `client/out/`).
+- Copy `databricks-tools-core` and `databricks-mcp-server` into `packages/`.
+- Copy skills from `databricks-skills/` into `skills/`.
+
+When prep finishes, it prints: `Prep complete. Run: databricks bundle deploy -t dev`.
+
+#### Step 2: Deploy
+
+From the same directory:
+
+**Option A – New Lakebase instance (dev)**
+
+Creates a new Lakebase instance and catalog, then deploys the app:
+
+```bash
+databricks bundle deploy -t dev
+```
+
+**Option B – Use an existing Lakebase instance (deploy app only, don’t touch DB)**
+
+If you already have a Lakebase instance and want to deploy or update only the app (no DB changes), use the `existing` target. Use your current instance name (e.g. `builder-app-db` from a previous `dev` deploy, or `daveok`).
+
+**First time** using `existing` for that instance – bind the DB so the bundle manages the existing instance instead of creating one:
+
+```bash
+INSTANCE_NAME="builder-app-db"   # or daveok, or your instance name
+
+databricks bundle deployment bind builder_db "$INSTANCE_NAME" -t existing --auto-approve
+databricks bundle deploy -t existing -var="lakebase_instance_name=$INSTANCE_NAME"
+```
+
+If bind reports **"Resource already managed by Terraform"**, the DB is already in state – just run the deploy command.
+
+**Later deploys** – only the app is updated; the DB is left as-is:
+
+```bash
+databricks bundle deploy -t existing -var="lakebase_instance_name=builder-app-db"
+```
+
+If you see **"Instance name is not unique"** when deploying (before binding), run the bind command above once, then deploy.
+
+#### After deployment
+
+- The app appears in your workspace under **Apps** (or the Apps UI).
+- Users open the app from the workspace; authentication uses their Databricks identity (OAuth / PAT as configured).
+
+#### Targets and variables
+
+| Target     | Use case                          | Lakebase                          |
+|-----------|------------------------------------|-----------------------------------|
+| `dev`     | Default; new instance per deploy  | Creates `builder-app-db`          |
+| `existing`| Reuse an existing instance         | Set `lakebase_instance_name=<name>` |
+| `prod`    | Production naming                  | `builder-app-db-prod`             |
+| `personal`| Custom app name                    | Uses `personal_app_name` variable |
+
+Variables (e.g. `app_name`, `lakebase_instance_name`, `lakebase_catalog_name`) are defined in `databricks.yml`. Override with `-var="name=value"` when running `databricks bundle deploy`.
+
+### Production Build
+
+```bash
+# Build frontend
+cd client && npm run build && cd ..
+
+# Run with uvicorn
+uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
+
+## Project Structure
+
+```
+databricks-builder-app/
+├── server/                 # FastAPI backend
+│   ├── app.py             # Main FastAPI app
+│   ├── db/                # Database models and migrations
+│   │   ├── models.py      # SQLAlchemy models
+│   │   └── database.py    # Session management
+│   ├── routers/           # API endpoints
+│   │   ├── agent.py       # /api/agent/* (invoke, etc.)
+│   │   ├── projects.py    # /api/projects/*
+│   │   └── conversations.py
+│   └── services/          # Business logic
+│       ├── agent.py       # Claude Code session management
+│       ├── databricks_tools.py  # MCP tool loading from SDK
+│       ├── user.py        # User auth (headers/env vars)
+│       ├── skills_manager.py
+│       ├── backup_manager.py
+│       └── system_prompt.py
+├── client/                # React frontend
+│   ├── src/
+│   │   ├── pages/         # Main pages (ProjectPage, etc.)
+│   │   └── components/    # UI components
+│   └── package.json
+├── alembic/               # Database migrations
+├── scripts/               # Utility scripts
+│   └── start_dev.sh       # Development startup
+├── skills/                # Cached skills (gitignored)
+├── projects/              # Project working directories (gitignored)
+├── pyproject.toml         # Python dependencies
+└── .env.example           # Environment template
+```
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/projects` | GET | List all projects |
+| `/api/projects` | POST | Create new project |
+| `/api/projects/{id}` | GET | Get project details |
+| `/api/projects/{id}/conversations` | GET | List project conversations |
+| `/api/conversations` | POST | Create new conversation |
+| `/api/conversations/{id}` | GET | Get conversation with messages |
+| `/api/agent/invoke` | POST | Send message to agent (SSE stream) |
+| `/api/config/user` | GET | Get current user info |
+
+## Embedding in Other Apps
+
+If you want to embed the Databricks agent into your own application, see the integration example at:
+
+```
+scripts/_integration-example/
+```
+
+This provides a minimal working example with setup instructions for integrating the agent services into external frameworks.
+
+## Related Packages
+
+- **databricks-tools-core**: Core MCP functionality and SQL operations
+- **databricks-mcp-server**: MCP server exposing Databricks tools
+- **databricks-skills**: Skill definitions for Databricks development
