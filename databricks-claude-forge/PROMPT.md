@@ -1,187 +1,111 @@
-# Task: Implement dual-app architecture for 150 concurrent users
+# Task: Fix deployment and add official Databricks templates
 
 ## Objective
 
-Create a dual-app deployment architecture where 2 Large Databricks Apps (each with ~12GB memory) can handle 150 concurrent Claude Code PTY sessions. Each app handles ~75 users via hash-based routing.
+Fix the Deploy functionality to properly deploy Databricks Apps using `databricks apps deploy` (not bundle deploy), and integrate templates from the official `databricks/app-templates` repository. The deploy button should work for simple apps with `app.yaml`.
 
 ## Context
 
-Read these files to understand the current architecture:
-- `app.yaml` - Current single-app configuration
-- `server/app.py` - FastAPI application entry point
-- `server/routers/pty.py` - PTY session management
-- `client/src/lib/api.ts` - Frontend API configuration
+Read these files to understand the current state:
+- `server/routers/deploy.py` - Current deploy logic (uses `databricks bundle deploy` - wrong for simple apps)
+- `server/services/templates.py` - Backend template definitions
+- `client/src/lib/templates.ts` - Frontend template definitions
+- `client/src/components/editor/DeployPanel.tsx` - Deploy UI component
+- `client/src/pages/HomePage.tsx` - Template selection UI
 
 Also read `progress.txt` if it exists - it contains learnings from previous iterations.
 
-## Background
-
-**Resource constraints:**
-- Large Databricks App: ~4 vCPU, ~12GB memory
-- Each PTY session: ~100MB memory
-- 150 users × 100MB = 15GB (exceeds single app)
-- Solution: 2 apps × 75 users × 100MB = 7.5GB each (fits)
-
-**Architecture:**
+Check recent changes:
+```bash
+git log --oneline -10 -- server/routers/deploy.py server/services/templates.py
 ```
-                    ┌─────────────────┐
-                    │   User Browser  │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  Frontend App   │
-                    │ (static files)  │
-                    └────────┬────────┘
-                             │
-              ┌──────────────┴──────────────┐
-              │   Hash-based routing        │
-              │   hash(email) % 2           │
-              └──────────────┬──────────────┘
-                    ┌────────┴────────┐
-           ┌────────▼────────┐ ┌──────▼──────────┐
-           │  Backend App 1  │ │  Backend App 2  │
-           │  (users 0-49%)  │ │  (users 50-100%)│
-           └────────┬────────┘ └────────┬────────┘
-                    └────────┬──────────┘
-                    ┌────────▼────────┐
-                    │   Lakebase DB   │
-                    │    (shared)     │
-                    └─────────────────┘
-```
+
+## Technical constraints
+
+- Use `databricks apps deploy` for projects with `app.yaml` (simple Databricks Apps)
+- Use `databricks bundle deploy` only for projects with `databricks.yml` (Asset Bundles)
+- Templates should come from or be synced with https://github.com/databricks/app-templates
+- Keep backward compatibility with existing projects
+- Do NOT change the frontend React framework or major UI components
 
 ## Requirements
 
-1. **Deployment configuration:**
-   - `app.yaml.backend.template` - Backend-only app config (no static files)
-   - `app.yaml.frontend.template` - Frontend-only app config (static files, routing logic)
-   - `deploy-dual.sh` - Script to deploy both backends + frontend
+1. **Fix deploy command selection**: Detect whether project has `app.yaml` vs `databricks.yml` and use the appropriate deploy command:
+   - `app.yaml` -> `databricks apps deploy <app-name> --source-code-path <project-dir>`
+   - `databricks.yml` -> `databricks bundle deploy --target <target>`
 
-2. **Backend changes:**
-   - Backend apps serve API only (no static file serving)
-   - Health endpoint at `/api/health` for monitoring
-   - App name/instance identifier in logs for debugging
+2. **Add templates API endpoint**: Create `/api/templates` endpoint that returns available templates. Initially can be hardcoded, but structure should support future GitHub fetching.
 
-3. **Frontend routing:**
-   - Determine backend URL based on hash of user email
-   - Store backend assignment in localStorage for session affinity
-   - Configurable backend URLs via environment variables
+3. **Update templates with official Databricks examples**: Update the template definitions to match the official `databricks/app-templates` repo structure. Include at minimum:
+   - `streamlit-hello-world-app` - Simple Streamlit app
+   - `dash-hello-world-app` - Simple Dash app
+   - `flask-hello-world-app` - Simple Flask API
+   - Keep existing templates (chatbot, dashboard, internal-tool, pipeline, databricks-app)
 
-4. **Shared resources:**
-   - Both backends connect to same Lakebase instance
-   - Projects stored in shared database (already implemented)
-   - PTY sessions are local to each backend (no sharing needed)
+4. **Add app name configuration**: When deploying with `databricks apps deploy`, need to specify or auto-generate app name. Add UI field or auto-generate from project name.
 
-## Technical approach
+5. **Fix deploy status parsing**: The current deploy status parsing expects bundle output format. Update to handle both bundle and apps deploy output.
 
-### Frontend routing (`client/src/lib/api.ts`)
+## Test plan (write these FIRST)
 
-```typescript
-// Backend URLs from environment or config
-const BACKEND_URLS = [
-  import.meta.env.VITE_BACKEND_1_URL || '/api',
-  import.meta.env.VITE_BACKEND_2_URL || '/api',
-];
+Follow TDD - write failing tests before writing implementation code.
 
-function getBackendUrl(userEmail: string): string {
-  // Check localStorage for existing assignment (session affinity)
-  const cached = localStorage.getItem('backend_assignment');
-  if (cached) {
-    const { email, url } = JSON.parse(cached);
-    if (email === userEmail) return url;
-  }
+### Tests to create
 
-  // Hash-based routing
-  const hash = userEmail.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  const backendIndex = hash % BACKEND_URLS.length;
-  const url = BACKEND_URLS[backendIndex];
-
-  // Cache assignment
-  localStorage.setItem('backend_assignment', JSON.stringify({ email: userEmail, url }));
-  return url;
-}
-```
-
-### Backend health endpoint (`server/routers/health.py`)
-
-```python
-@router.get('/health')
-async def health_check():
-    return {
-        'status': 'healthy',
-        'app_instance': os.getenv('APP_INSTANCE', 'unknown'),
-        'active_pty_sessions': len(_sessions),
-    }
-```
-
-### Deployment script (`deploy-dual.sh`)
-
-```bash
-#!/bin/bash
-# Deploy dual-app architecture
-
-WORKSPACE_URL="${DATABRICKS_HOST}"
-APP_PREFIX="${APP_PREFIX:-builder}"
-
-# Deploy backend 1
-databricks apps deploy "${APP_PREFIX}-backend-1" \
-  --source-code-path . \
-  --config app.yaml.backend.template \
-  --env APP_INSTANCE=backend-1
-
-# Deploy backend 2
-databricks apps deploy "${APP_PREFIX}-backend-2" \
-  --source-code-path . \
-  --config app.yaml.backend.template \
-  --env APP_INSTANCE=backend-2
-
-# Deploy frontend (with backend URLs)
-databricks apps deploy "${APP_PREFIX}-frontend" \
-  --source-code-path ./client/out \
-  --config app.yaml.frontend.template \
-  --env VITE_BACKEND_1_URL="https://${APP_PREFIX}-backend-1.${WORKSPACE_URL#https://}" \
-  --env VITE_BACKEND_2_URL="https://${APP_PREFIX}-backend-2.${WORKSPACE_URL#https://}"
-```
+- [ ] `server/tests/test_deploy.py`: `test_detect_app_yaml_uses_apps_deploy` - Verify projects with app.yaml use `databricks apps deploy`
+- [ ] `server/tests/test_deploy.py`: `test_detect_databricks_yml_uses_bundle_deploy` - Verify projects with databricks.yml use `databricks bundle deploy`
+- [ ] `server/tests/test_deploy.py`: `test_generate_app_name_from_project` - Verify app name generation is valid (lowercase, hyphenated, max length)
+- [ ] `server/tests/test_templates.py`: `test_get_templates_endpoint` - Verify `/api/templates` returns list of templates
+- [ ] `server/tests/test_templates.py`: `test_template_has_required_fields` - Verify each template has id, name, description, files
 
 ## Gates
 
-Run `bash gates.sh` to verify code quality:
+Run `bash gates.sh` to verify all completion criteria at once. This script runs these checks:
 
 | Gate | Command |
 |------|---------|
-| Lint | uvx ruff check . |
-| Types | cd client && npx tsc --noEmit |
-| Build | npm run build |
+| Lint | `ruff check server/` |
+| Types | `cd client && npx tsc --noEmit` |
+| Build | `cd client && npm run build` |
+
+Output looks like:
+```
+  Lint         ok
+  Types        ok
+  Build        ok
+
+All 3 gate(s) passed
+```
 
 ## Completion criteria
 
 The task is COMPLETE only when:
 - [ ] `bash gates.sh` exits with code 0
-- [ ] `app.yaml.backend.template` exists with backend-only config
-- [ ] `app.yaml.frontend.template` exists with frontend-only config
-- [ ] `deploy-dual.sh` exists and is executable
-- [ ] `client/src/lib/api.ts` has hash-based backend routing
-- [ ] `server/routers/health.py` exists with health endpoint
-- [ ] Health router is registered in `server/app.py`
+- [ ] All tests from the test plan above are written and passing
+- [ ] Deploy button works for a project with `app.yaml` (manually verified)
 
 Do NOT assess completion subjectively. Run `bash gates.sh` and check the exit code.
 
 ## Instructions
 
+Follow TDD (red-green-refactor) for each requirement:
+
 1. Read the context files listed above
 2. Read `progress.txt` if it exists to learn from previous iterations
-3. Create `server/routers/health.py` with health endpoint
-4. Register health router in `server/app.py`
-5. Modify `client/src/lib/api.ts` to support backend routing:
-   - Add `getBackendUrl()` function
-   - Update API calls to use routed URL for PTY endpoints
-6. Create `app.yaml.backend.template` (API-only, no static files)
-7. Create `app.yaml.frontend.template` (static files only)
-8. Create `deploy-dual.sh` deployment script
-9. Run `bash gates.sh` - all gates should pass
-10. Commit working changes with clear messages
-11. Append to `progress.txt` what you learned this iteration
+3. **Red**: Write failing tests for requirement 1 (see test plan above)
+4. Run `bash gates.sh` - the test gate should fail (this is expected)
+5. **Green**: Write the minimum implementation to make the tests pass
+6. Run `bash gates.sh` - all gates should pass now
+7. **Refactor**: Clean up while keeping gates green
+8. Repeat steps 3-7 for each remaining requirement
+9. Commit working changes with clear messages
+10. Append to `progress.txt` what you learned this iteration:
+    - What you implemented
+    - What worked / what didn't
+    - Patterns discovered
+    - Gotchas for future iterations
 
-When `bash gates.sh` exits 0 AND all deliverables are created, output:
+When `bash gates.sh` exits 0 AND all tests from the test plan are written, output:
 <promise>TASK COMPLETE</promise>
 
 CRITICAL RULES:
@@ -190,3 +114,27 @@ CRITICAL RULES:
 - Do NOT lie or output a false promise to escape the loop, even if you feel stuck
 - If gates fail, fix the code and re-run until they pass
 - If genuinely stuck after sustained effort, append your blockers to `progress.txt` instead of declaring completion. Do NOT output the promise tag.
+
+## Reference: Databricks CLI commands
+
+```bash
+# Deploy simple Databricks App (app.yaml)
+databricks apps deploy <app-name> --source-code-path /path/to/project
+
+# Deploy Asset Bundle (databricks.yml)
+databricks bundle deploy --target dev
+
+# Get app info
+databricks apps get <app-name>
+
+# List apps
+databricks apps list
+```
+
+## Reference: Template structure from databricks/app-templates
+
+Each template folder contains:
+- `app.yaml` - Databricks Apps config
+- `app.py` or `main.py` - Main application file
+- `requirements.txt` - Python dependencies
+- Optional: `README.md`, frontend files, etc.
