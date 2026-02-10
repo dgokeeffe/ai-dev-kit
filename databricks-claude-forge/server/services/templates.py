@@ -8,7 +8,183 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-TEMPLATES: dict[str, dict] = {
+# Official Databricks app-templates (from github.com/databricks/app-templates)
+OFFICIAL_TEMPLATES: dict[str, dict] = {
+  'streamlit-hello-world-app': {
+    'name': 'Streamlit Hello World',
+    'description': 'Simple Streamlit app for interactive data applications',
+    'files': {
+      'app.py': """\
+import streamlit as st
+
+st.title("Hello from Databricks Apps!")
+st.write("This is a simple Streamlit application running on Databricks.")
+
+name = st.text_input("Enter your name")
+if name:
+    st.write(f"Hello, {name}!")
+
+st.write("---")
+st.write("To learn more about Databricks Apps, visit the documentation.")
+""",
+      'requirements.txt': """\
+streamlit
+""",
+      'app.yaml': """\
+command:
+  - streamlit
+  - run
+  - app.py
+  - --server.port
+  - $DATABRICKS_APP_PORT
+  - --server.address
+  - 0.0.0.0
+""",
+    },
+    'claude_md': """\
+# Streamlit Hello World
+
+Simple Streamlit application on Databricks Apps.
+
+## Architecture
+- Single-file Streamlit app
+- No database required
+- Interactive widgets via Streamlit
+
+## Key patterns
+- Use `st.write()` for output
+- Use `st.text_input()`, `st.button()`, etc. for inputs
+- Streamlit auto-reruns on widget interaction
+
+## Resources created
+(none yet)
+""",
+  },
+  'dash-hello-world-app': {
+    'name': 'Dash Hello World',
+    'description': 'Simple Dash app for data visualization',
+    'files': {
+      'app.py': """\
+import os
+from dash import Dash, html, dcc
+import plotly.express as px
+import pandas as pd
+
+app = Dash(__name__)
+
+# Sample data
+df = pd.DataFrame({
+    "Category": ["A", "B", "C", "D"],
+    "Values": [4, 3, 2, 5]
+})
+
+fig = px.bar(df, x="Category", y="Values", title="Sample Bar Chart")
+
+app.layout = html.Div([
+    html.H1("Hello from Databricks Apps!"),
+    html.P("This is a simple Dash application."),
+    dcc.Graph(figure=fig)
+])
+
+server = app.server
+
+if __name__ == "__main__":
+    port = int(os.getenv("DATABRICKS_APP_PORT", "8050"))
+    app.run(host="0.0.0.0", port=port, debug=False)
+""",
+      'requirements.txt': """\
+dash
+plotly
+pandas
+gunicorn
+""",
+      'app.yaml': """\
+command:
+  - gunicorn
+  - app:server
+  - --bind
+  - 0.0.0.0:$DATABRICKS_APP_PORT
+""",
+    },
+    'claude_md': """\
+# Dash Hello World
+
+Simple Dash application with Plotly charts.
+
+## Architecture
+- Dash app with Plotly Express charts
+- Gunicorn for production serving
+- Single-file application
+
+## Key patterns
+- Use `dcc.Graph()` for charts
+- Use `html.Div()`, `html.H1()` for layout
+- `app.server` is the Flask server for gunicorn
+
+## Resources created
+(none yet)
+""",
+  },
+  'flask-hello-world-app': {
+    'name': 'Flask Hello World',
+    'description': 'Simple Flask API server',
+    'files': {
+      'app.py': """\
+import os
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+@app.route("/")
+def hello():
+    return jsonify({
+        "message": "Hello from Databricks Apps!",
+        "status": "running"
+    })
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "healthy"})
+
+if __name__ == "__main__":
+    port = int(os.getenv("DATABRICKS_APP_PORT", "5000"))
+    app.run(host="0.0.0.0", port=port, debug=False)
+""",
+      'requirements.txt': """\
+flask
+gunicorn
+""",
+      'app.yaml': """\
+command:
+  - gunicorn
+  - app:app
+  - --bind
+  - 0.0.0.0:$DATABRICKS_APP_PORT
+""",
+    },
+    'claude_md': """\
+# Flask Hello World
+
+Simple Flask API server.
+
+## Architecture
+- Flask app with JSON API endpoints
+- Gunicorn for production serving
+- Minimal dependencies
+
+## Key patterns
+- Use `@app.route()` for endpoints
+- Use `jsonify()` for JSON responses
+- Health endpoint at `/health`
+
+## Resources created
+(none yet)
+""",
+  },
+}
+
+# Custom templates for this application
+CUSTOM_TEMPLATES: dict[str, dict] = {
   'chatbot': {
     'files': {
       'app.py': """\
@@ -586,6 +762,9 @@ React Frontend → FastAPI Backend → Databricks APIs
 """,
   },
 }
+
+# Merge official and custom templates (custom takes precedence for duplicates)
+TEMPLATES: dict[str, dict] = {**OFFICIAL_TEMPLATES, **CUSTOM_TEMPLATES}
 
 
 def write_template_files(project_dir: Path, template_id: str) -> None:

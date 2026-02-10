@@ -12,6 +12,7 @@ from .preview import router as preview_router
 from .projects import router as projects_router
 from .pty import router as pty_router
 from .skills import router as skills_router
+from .templates import router as templates_router
 from .terminal import router as terminal_router
 from .warehouses import router as warehouses_router
 
@@ -28,6 +29,7 @@ __all__ = [
   'projects_router',
   'pty_router',
   'skills_router',
+  'templates_router',
   'terminal_router',
   'warehouses_router',
 ]

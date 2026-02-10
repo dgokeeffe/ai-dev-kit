@@ -42,6 +42,7 @@ from .routers import (  # noqa: E402
   projects_router,
   pty_router,
   skills_router,
+  templates_router,
   terminal_router,
   warehouses_router,
 )
@@ -193,6 +194,7 @@ app.include_router(projects_router, prefix=API_PREFIX, tags=['projects'])
 app.include_router(conversations_router, prefix=API_PREFIX, tags=['conversations'])
 app.include_router(agent_router, prefix=API_PREFIX, tags=['agent'])
 app.include_router(skills_router, prefix=API_PREFIX, tags=['skills'])
+app.include_router(templates_router, prefix=API_PREFIX, tags=['templates'])
 app.include_router(files_router, prefix=API_PREFIX, tags=['files'])
 app.include_router(git_router, prefix=API_PREFIX, tags=['git'])
 app.include_router(deploy_router, prefix=API_PREFIX, tags=['deploy'])
