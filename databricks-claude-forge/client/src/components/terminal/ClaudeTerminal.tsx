@@ -107,6 +107,12 @@ export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximiz
           pollIntervalRef.current = Math.min(pollIntervalRef.current * 1.5, 2000);
         }
 
+        // Check for file changes to trigger file tree refresh
+        if (data.files_modified_at && data.files_modified_at > lastMtimeRef.current) {
+          lastMtimeRef.current = data.files_modified_at;
+          onFilesChanged?.();
+        }
+
         if (data.exited) {
           xtermRef.current?.writeln('\r\n\x1b[33m⚠ Process exited\x1b[0m');
           setConnectionState('disconnected');
@@ -130,7 +136,7 @@ export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximiz
 
     // Start polling
     poll();
-  }, [projectId, stopPolling]);
+  }, [projectId, stopPolling, onFilesChanged]);
 
   // Create a PTY session
   const connect = useCallback(async () => {
