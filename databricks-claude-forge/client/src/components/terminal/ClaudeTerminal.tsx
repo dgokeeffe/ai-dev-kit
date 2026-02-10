@@ -34,6 +34,9 @@ export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximiz
   const isReconnectingRef = useRef(false);
   const reconnectFnRef = useRef<(() => void) | null>(null);
   const lastMtimeRef = useRef<number>(0);
+  // Input batching refs - collect keystrokes for 15ms before sending
+  const inputBufferRef = useRef<string>('');
+  const inputFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
@@ -41,6 +44,22 @@ export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximiz
       pollingRef.current = null;
     }
   }, []);
+
+  // Flush batched input to PTY (fire-and-forget)
+  const flushInput = useCallback(() => {
+    const data = inputBufferRef.current;
+    inputBufferRef.current = '';
+    inputFlushTimerRef.current = null;
+
+    const sid = sessionIdRef.current;
+    if (!data || !sid) return;
+
+    fetch(`${API_BASE}/projects/${projectId}/pty/${sid}/input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: btoa(data) }),
+    }).catch(() => {});
+  }, [projectId]);
 
   const sendResize = useCallback(async (sid: string) => {
     const terminal = xtermRef.current;
@@ -71,11 +90,13 @@ export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximiz
 
   const startPolling = useCallback((sid: string) => {
     stopPolling();
-    pollIntervalRef.current = 100; // Reset to fast polling
+    pollIntervalRef.current = 50; // Start at 50ms for fast initial response
 
     const poll = async () => {
       try {
-        const res = await fetch(`${API_BASE}/projects/${projectId}/pty/${sid}/output`, {
+        // Use long-polling: server holds connection up to 3s waiting for data
+        const timeout = pollIntervalRef.current < 200 ? 3.0 : 1.0;
+        const res = await fetch(`${API_BASE}/projects/${projectId}/pty/${sid}/output?timeout=${timeout}`, {
           method: 'POST',
         });
 
@@ -95,7 +116,7 @@ export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximiz
 
         if (data.output) {
           // Got data - reset to fast polling
-          pollIntervalRef.current = 100;
+          pollIntervalRef.current = 50;
           const raw = atob(data.output);
           const bytes = new Uint8Array(raw.length);
           for (let i = 0; i < raw.length; i++) {
@@ -104,7 +125,8 @@ export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximiz
           xtermRef.current?.write(bytes);
         } else {
           // No data - exponential backoff (max 2 seconds)
-          pollIntervalRef.current = Math.min(pollIntervalRef.current * 1.5, 2000);
+          // With long-polling, we can back off more aggressively since server waits
+          pollIntervalRef.current = Math.min(pollIntervalRef.current * 2, 2000);
         }
 
         // Check for file changes to trigger file tree refresh
@@ -233,16 +255,22 @@ export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximiz
     terminal.writeln('\x1b[1;34m╰─────────────────────────────────────────────────────╯\x1b[0m');
     terminal.writeln('');
 
-    // Send keystrokes to PTY via HTTP
+    // Send keystrokes to PTY via HTTP with batching
     terminal.onData((data: string) => {
-      const sid = sessionIdRef.current;
-      if (!sid) return;
-      const encoded = btoa(data);
-      fetch(`${API_BASE}/projects/${projectId}/pty/${sid}/input`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: encoded }),
-      }).catch(() => {});
+      if (!sessionIdRef.current) return;
+
+      // Batch keystrokes: accumulate input and flush after 15ms
+      inputBufferRef.current += data;
+
+      // Reset polling to fast when user types (immediate response feel)
+      pollIntervalRef.current = 50;
+
+      // Schedule flush if not already scheduled
+      if (!inputFlushTimerRef.current) {
+        inputFlushTimerRef.current = setTimeout(() => {
+          flushInput();
+        }, 15);
+      }
     });
 
     return () => {
@@ -263,6 +291,11 @@ export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximiz
     return () => {
       clearTimeout(timer);
       stopPolling();
+      // Clear input flush timer
+      if (inputFlushTimerRef.current) {
+        clearTimeout(inputFlushTimerRef.current);
+        inputFlushTimerRef.current = null;
+      }
       // Don't delete session on unmount - keep it alive for reattachment
       // Server idle timeout handles cleanup
     };

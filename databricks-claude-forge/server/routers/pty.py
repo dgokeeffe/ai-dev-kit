@@ -5,6 +5,7 @@ using HTTP polling for I/O instead of WebSockets (Databricks Apps
 reverse proxy does not support WebSocket upgrades).
 """
 
+import asyncio
 import base64
 import fcntl
 import logging
@@ -20,7 +21,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from ..services.backup_manager import ensure_project_directory
@@ -522,13 +523,29 @@ def _get_latest_mtime(project_dir: str, project_id: str) -> float:
 
 
 @router.post('/projects/{project_id}/pty/{session_id}/output')
-async def poll_output(project_id: str, session_id: str):
-  """Drain buffered PTY output (base64-encoded).
+async def poll_output(
+  project_id: str,
+  session_id: str,
+  timeout: float = Query(default=0.0, ge=0.0, le=5.0),
+):
+  """Drain buffered PTY output (base64-encoded) with optional long-polling.
+
+  Long-polling: if timeout > 0, waits up to `timeout` seconds for data to arrive
+  before returning. This reduces polling overhead and improves responsiveness.
 
   Thread-safe with output_lock to prevent race conditions with reader thread.
   """
   session = _get_session(project_id, session_id)
   session.last_activity = time.time()
+
+  # Long-polling: wait for data if buffer is empty and timeout is specified
+  if timeout > 0:
+    start = time.time()
+    while time.time() - start < timeout:
+      with session.output_lock:
+        if session.output_buffer or not session.alive:
+          break
+      await asyncio.sleep(0.01)  # 10ms check interval
 
   # Drain all buffered chunks (thread-safe)
   chunks: list[bytes] = []
