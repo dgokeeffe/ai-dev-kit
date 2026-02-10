@@ -566,25 +566,43 @@ def ensure_table_permissions() -> None:
             logger.warning('Could not determine service principal ID for permission check')
             return
 
-        # Check current instance role
-        role = client.database.get_database_instance_role(
-            instance_name=instance_name, name=sp_id
-        )
-        role_dict = role.as_dict()
-        current_membership = role_dict.get('membership_role')
+        # Try to get existing role; create it if it doesn't exist
+        try:
+            role = client.database.get_database_instance_role(
+                instance_name=instance_name, name=sp_id
+            )
+            role_dict = role.as_dict()
+            current_membership = role_dict.get('membership_role')
 
-        if current_membership == 'DATABRICKS_SUPERUSER':
-            logger.info(f'SP {sp_id} already has DATABRICKS_SUPERUSER on {instance_name}')
-            return
+            if current_membership == 'DATABRICKS_SUPERUSER':
+                logger.info(f'SP {sp_id} already has DATABRICKS_SUPERUSER on {instance_name}')
+                return
 
-        # Promote to DATABRICKS_SUPERUSER via PATCH
-        logger.info(f'Promoting SP {sp_id} to DATABRICKS_SUPERUSER on {instance_name}...')
-        client.api_client.do(
-            'PATCH',
-            f'/api/2.0/database/instances/{instance_name}/roles/{sp_id}',
-            body={'membership_role': 'DATABRICKS_SUPERUSER'},
-        )
-        logger.info(f'SP {sp_id} promoted to DATABRICKS_SUPERUSER on {instance_name}')
+            # Promote existing role to DATABRICKS_SUPERUSER via PATCH
+            logger.info(f'Promoting SP {sp_id} to DATABRICKS_SUPERUSER on {instance_name}...')
+            client.api_client.do(
+                'PATCH',
+                f'/api/2.0/database/instances/{instance_name}/roles/{sp_id}',
+                body={'membership_role': 'DATABRICKS_SUPERUSER'},
+            )
+            logger.info(f'SP {sp_id} promoted to DATABRICKS_SUPERUSER on {instance_name}')
+
+        except Exception as role_err:
+            if 'does not exist' in str(role_err) or 'NOT_FOUND' in str(role_err):
+                # Role doesn't exist yet - create it with DATABRICKS_SUPERUSER
+                logger.info(f'Role {sp_id} does not exist on {instance_name}, creating...')
+                client.api_client.do(
+                    'POST',
+                    f'/api/2.0/database/instances/{instance_name}/roles',
+                    body={
+                        'name': sp_id,
+                        'identity_type': 'SERVICE_PRINCIPAL',
+                        'membership_role': 'DATABRICKS_SUPERUSER',
+                    },
+                )
+                logger.info(f'Created role {sp_id} with DATABRICKS_SUPERUSER on {instance_name}')
+            else:
+                raise
 
     except Exception as e:
         logger.warning(

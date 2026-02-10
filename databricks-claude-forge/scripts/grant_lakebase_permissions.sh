@@ -79,8 +79,8 @@ fi
 echo -e "  Service Principal:  ${GREEN}${SERVICE_PRINCIPAL_ID}${NC}"
 echo ""
 
-# Step 2: Promote SP to DATABRICKS_SUPERUSER via Lakebase API
-echo -e "${YELLOW}[2/2] Setting DATABRICKS_SUPERUSER membership via Lakebase API...${NC}"
+# Step 2: Create role (if needed) and promote to DATABRICKS_SUPERUSER
+echo -e "${YELLOW}[2/2] Ensuring role exists with DATABRICKS_SUPERUSER membership...${NC}"
 
 python3 -c "
 from databricks.sdk import WorkspaceClient
@@ -89,24 +89,41 @@ w = WorkspaceClient()
 sp_id = '${SERVICE_PRINCIPAL_ID}'
 instance = '${LAKEBASE_INSTANCE}'
 
-# Check current role
-role = w.database.get_database_instance_role(instance_name=instance, name=sp_id)
-current = role.as_dict()
-membership = current.get('membership_role')
+# Try to get existing role first
+try:
+    role = w.database.get_database_instance_role(instance_name=instance, name=sp_id)
+    current = role.as_dict()
+    membership = current.get('membership_role')
 
-if membership == 'DATABRICKS_SUPERUSER':
-    print(f'  SP already has DATABRICKS_SUPERUSER membership - no change needed')
-else:
-    # PATCH the role to add DATABRICKS_SUPERUSER membership
-    resp = w.api_client.do(
-        'PATCH',
-        f'/api/2.0/database/instances/{instance}/roles/{sp_id}',
-        body={
-            'membership_role': 'DATABRICKS_SUPERUSER',
-        },
-    )
-    new_membership = resp.get('membership_role', 'unknown')
-    print(f'  Updated membership_role: {membership or \"(none)\"} -> {new_membership}')
+    if membership == 'DATABRICKS_SUPERUSER':
+        print(f'  SP already has DATABRICKS_SUPERUSER membership - no change needed')
+    else:
+        # Role exists but needs promotion
+        resp = w.api_client.do(
+            'PATCH',
+            f'/api/2.0/database/instances/{instance}/roles/{sp_id}',
+            body={'membership_role': 'DATABRICKS_SUPERUSER'},
+        )
+        new_membership = resp.get('membership_role', 'unknown')
+        print(f'  Updated membership_role: {membership or \"(none)\"} -> {new_membership}')
+
+except Exception as e:
+    if 'does not exist' in str(e) or '404' in str(e) or 'NOT_FOUND' in str(e):
+        # Role does not exist yet - create it
+        print(f'  Role does not exist, creating with DATABRICKS_SUPERUSER...')
+        resp = w.api_client.do(
+            'POST',
+            f'/api/2.0/database/instances/{instance}/roles',
+            body={
+                'name': sp_id,
+                'identity_type': 'SERVICE_PRINCIPAL',
+                'membership_role': 'DATABRICKS_SUPERUSER',
+            },
+        )
+        new_membership = resp.get('membership_role', 'unknown')
+        print(f'  Created role with membership_role: {new_membership}')
+    else:
+        raise
 " 2>&1
 
 if [ $? -eq 0 ]; then
