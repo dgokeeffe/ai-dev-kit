@@ -58,6 +58,14 @@ class PtySession:
 _sessions: dict[str, PtySession] = {}
 _sessions_lock = threading.Lock()
 
+# Mtime cache to avoid repeated filesystem walks on every poll
+_mtime_cache: dict[str, tuple[float, float]] = {}  # project_id -> (mtime, cache_time)
+_mtime_cache_lock = threading.Lock()
+MTIME_CACHE_TTL = 2.0  # Cache for 2 seconds
+
+# Idle timeout - configurable via environment variable (default 30 minutes)
+IDLE_TIMEOUT_SECONDS = int(os.getenv('PTY_IDLE_TIMEOUT', '1800'))
+
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -270,8 +278,8 @@ def _cleanup_loop():
     with _sessions_lock:
       for sid, sess in _sessions.items():
         idle = now - sess.last_activity
-        # Kill sessions idle for >300s (5 minutes), or dead sessions with drained buffers
-        if idle > 300 or (not sess.alive and len(sess.output_buffer) == 0):
+        # Kill sessions idle for >IDLE_TIMEOUT_SECONDS, or dead sessions with drained buffers
+        if idle > IDLE_TIMEOUT_SECONDS or (not sess.alive and len(sess.output_buffer) == 0):
           to_remove.append(sid)
 
     for sid in to_remove:
@@ -469,12 +477,24 @@ def _get_session(project_id: str, session_id: str) -> PtySession:
   return session
 
 
-def _get_latest_mtime(project_dir: str) -> float:
+def _get_latest_mtime(project_dir: str, project_id: str) -> float:
   """Get the most recent modification time of any file in project_dir.
+
+  Uses caching to avoid repeated filesystem walks on every poll (10x/sec).
+  Cache is refreshed every MTIME_CACHE_TTL seconds.
 
   Used to detect when Claude creates or modifies files so the frontend
   can auto-refresh the file tree.
   """
+  now = time.time()
+
+  # Check cache first
+  with _mtime_cache_lock:
+    cached = _mtime_cache.get(project_id)
+    if cached and (now - cached[1]) < MTIME_CACHE_TTL:
+      return cached[0]
+
+  # Cache miss - do the walk
   latest = 0.0
   try:
     for root, dirs, files in os.walk(project_dir):
@@ -492,6 +512,11 @@ def _get_latest_mtime(project_dir: str) -> float:
           pass
   except Exception:
     pass
+
+  # Update cache
+  with _mtime_cache_lock:
+    _mtime_cache[project_id] = (latest, now)
+
   return latest
 
 
@@ -520,9 +545,9 @@ async def poll_output(project_id: str, session_id: str):
   if not session.alive:
     result['exited'] = True
 
-  # Add file modification timestamp for auto-refresh
+  # Add file modification timestamp for auto-refresh (cached to avoid repeated walks)
   project_dir = ensure_project_directory(session.project_id)
-  result['files_modified_at'] = _get_latest_mtime(str(project_dir))
+  result['files_modified_at'] = _get_latest_mtime(str(project_dir), session.project_id)
 
   return result
 
@@ -567,3 +592,18 @@ async def kill_session(project_id: str, session_id: str):
 
   _kill_session(session_id)
   return {'status': 'killed'}
+
+
+@router.post('/projects/{project_id}/pty/{session_id}/terminate')
+async def terminate_session(project_id: str, session_id: str):
+  """Terminate PTY session. Called via sendBeacon on page unload.
+
+  Unlike the DELETE endpoint, this returns success even if session not found
+  (since sendBeacon can't handle errors and the session may already be gone).
+  """
+  with _sessions_lock:
+    session = _sessions.get(session_id)
+  if session is None or session.project_id != project_id:
+    return {'status': 'not_found'}
+  _kill_session(session_id)
+  return {'status': 'terminated'}

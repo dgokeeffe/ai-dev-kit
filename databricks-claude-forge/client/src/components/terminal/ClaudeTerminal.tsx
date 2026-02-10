@@ -263,13 +263,23 @@ export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximiz
     return () => {
       clearTimeout(timer);
       stopPolling();
-      const sid = sessionIdRef.current;
-      if (sid) {
-        fetch(`${API_BASE}/projects/${projectId}/pty/${sid}`, { method: 'DELETE' }).catch(() => {});
-        sessionIdRef.current = null;
-      }
+      // Don't delete session on unmount - keep it alive for reattachment
+      // Server idle timeout handles cleanup
     };
   }, [connect, stopPolling, projectId]);
+
+  // Clean up session only when page is actually closed (not on component unmount)
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const sid = sessionIdRef.current;
+      if (sid) {
+        // Use sendBeacon for reliable delivery during page unload
+        navigator.sendBeacon(`${API_BASE}/projects/${projectId}/pty/${sid}/terminate`, '');
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [projectId]);
 
   // Handle resize
   useEffect(() => {

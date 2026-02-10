@@ -197,9 +197,9 @@ export function IDELayout({
         )}
       </div>
 
-      {/* Right Sidebar (Chat) - hidden when maximized */}
-      {!isClaudeMaximized && isRightSidebarOpen && rightSidebar && (
-        <>
+      {/* Right Sidebar (Chat) - hidden when maximized, uses CSS visibility to preserve PTY session */}
+      {!isClaudeMaximized && rightSidebar && (
+        <div className={cn('flex', !isRightSidebarOpen && 'hidden')}>
           {/* Resize handle */}
           <div
             ref={rightResizeRef}
@@ -213,7 +213,7 @@ export function IDELayout({
           >
             {rightSidebar}
           </div>
-        </>
+        </div>
       )}
     </div>
   );
