@@ -31,8 +31,8 @@ class UpdateConversationRequest(BaseModel):
 async def get_all_conversations(
   request: Request,
   project_id: str,
-  limit: int = Query(50, ge=1, le=100, description="Maximum number of conversations to return"),
-  offset: int = Query(0, ge=0, description="Number of conversations to skip")
+  limit: int = Query(50, ge=1, le=100, description='Maximum number of conversations to return'),
+  offset: int = Query(0, ge=0, description='Number of conversations to skip')
 ):
   """Get all conversations for a project sorted by created_at (newest first).
 
@@ -41,7 +41,7 @@ async def get_all_conversations(
   user_email = await get_current_user(request)
   storage = ConversationStorage(user_email, project_id)
 
-  logger.info(f'Fetching conversations for project {project_id}, user: {user_email} (limit={limit}, offset={offset})')
+  logger.info(f'Fetching conversations for project {project_id}, user: {user_email}')
   conversations = await storage.get_all(limit=limit, offset=offset)
   logger.info(f'Retrieved {len(conversations)} conversations for project {project_id}')
 

@@ -148,7 +148,8 @@ def _get_databricks_credentials_from_headers(request: Request) -> tuple[str | No
   app_url = request.headers.get('X-Forwarded-Host')
   host = get_workspace_url(app_url)
 
-  logger.info(f'PTY credentials - host: {host}, has_token: {bool(token)}, token_len: {len(token) if token else 0}')
+  token_len = len(token) if token else 0
+  logger.info(f'PTY credentials - host: {host}, has_token: {bool(token)}, token_len: {token_len}')
 
   if host and token:
     if not host.startswith('http'):

@@ -387,10 +387,10 @@ def init_database(database_url: Optional[str] = None) -> AsyncEngine:
 
     _engine = create_async_engine(
         url,
-        pool_size=int(os.environ.get('DB_POOL_SIZE', '20')),  # Increased from 5 to 20 for multi-user
-        max_overflow=int(os.environ.get('DB_MAX_OVERFLOW', '30')),  # Increased from 10 to 30
-        pool_pre_ping=True,  # Enable connection health checks
-        pool_recycle=int(os.environ.get('DB_POOL_RECYCLE_INTERVAL', '1800')),  # 30min instead of 1hr
+        pool_size=int(os.environ.get('DB_POOL_SIZE', '20')),
+        max_overflow=int(os.environ.get('DB_MAX_OVERFLOW', '30')),
+        pool_pre_ping=True,
+        pool_recycle=int(os.environ.get('DB_POOL_RECYCLE_INTERVAL', '1800')),
         pool_timeout=int(os.environ.get('DB_POOL_TIMEOUT', '10')),
         echo=False,
         connect_args=connect_args,
