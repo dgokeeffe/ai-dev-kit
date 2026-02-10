@@ -1,8 +1,16 @@
-import { ReactNode, useRef, useEffect } from 'react';
-import { GripVertical } from 'lucide-react';
+import { ReactNode, useCallback } from 'react';
+import {
+  Group,
+  Panel,
+  Separator,
+  usePanelRef,
+  PanelImperativeHandle,
+  PanelSize,
+} from 'react-resizable-panels';
+import { GripVertical, GripHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ActivityBar, ActivityType } from './ActivityBar';
-import { BottomPanel, BottomPanelTab } from './BottomPanel';
+import { BottomPanelTab } from './BottomPanel';
 
 interface IDELayoutProps {
   // Activity bar
@@ -39,6 +47,85 @@ interface IDELayoutProps {
   className?: string;
 }
 
+// Custom resize handle for vertical (column) resizing
+function VerticalResizeHandle({ className }: { className?: string }) {
+  return (
+    <Separator
+      className={cn(
+        'w-1 bg-[var(--color-border)] hover:bg-[var(--color-accent-primary)]/50 flex items-center justify-center transition-colors',
+        className
+      )}
+    >
+      <GripVertical className="h-4 w-4 text-[var(--color-text-muted)]" />
+    </Separator>
+  );
+}
+
+// Custom resize handle for horizontal (row) resizing
+function HorizontalResizeHandle({ className }: { className?: string }) {
+  return (
+    <Separator
+      className={cn(
+        'h-1 bg-[var(--color-border)] hover:bg-[var(--color-accent-primary)]/50 flex items-center justify-center transition-colors',
+        className
+      )}
+    >
+      <GripHorizontal className="h-4 w-4 text-[var(--color-text-muted)]" />
+    </Separator>
+  );
+}
+
+// Bottom panel header with tabs
+function BottomPanelHeader({
+  isOpen,
+  onToggle,
+  activeTab,
+  onTabChange,
+}: {
+  isOpen: boolean;
+  onToggle: () => void;
+  activeTab: BottomPanelTab;
+  onTabChange: (tab: BottomPanelTab) => void;
+}) {
+  const tabs: { id: BottomPanelTab; label: string }[] = [
+    { id: 'terminal', label: 'Terminal' },
+    { id: 'output', label: 'Output' },
+    { id: 'deploy', label: 'Deploy' },
+    { id: 'preview', label: 'Preview' },
+  ];
+
+  return (
+    <div className="flex items-center h-8 px-2 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
+      <div className="flex items-center gap-1">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => {
+              onTabChange(tab.id);
+              if (!isOpen) onToggle();
+            }}
+            className={cn(
+              'px-2 py-1 text-xs font-medium rounded transition-colors',
+              activeTab === tab.id && isOpen
+                ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-heading)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'
+            )}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1" />
+      <button
+        onClick={onToggle}
+        className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+      >
+        {isOpen ? '▼' : '▲'}
+      </button>
+    </div>
+  );
+}
+
 export function IDELayout({
   activeActivity,
   onActivityChange,
@@ -51,7 +138,7 @@ export function IDELayout({
   onRightSidebarWidthChange,
   isRightSidebarOpen = true,
   bottomPanel,
-  bottomPanelHeight = 200,
+  bottomPanelHeight: _bottomPanelHeight = 200,
   onBottomPanelHeightChange,
   isBottomPanelOpen = false,
   onBottomPanelToggle,
@@ -61,160 +148,166 @@ export function IDELayout({
   onBottomPanelTabChange,
   className = '',
 }: IDELayoutProps) {
-  const leftResizeRef = useRef<HTMLDivElement>(null);
-  const rightResizeRef = useRef<HTMLDivElement>(null);
+  const bottomPanelRef = usePanelRef();
 
-  // Left sidebar resize
-  useEffect(() => {
-    const resizeEl = leftResizeRef.current;
-    if (!resizeEl || !onLeftSidebarWidthChange) return;
+  const showLeftSidebar =
+    activeActivity === 'explorer' ||
+    activeActivity === 'search' ||
+    activeActivity === 'git';
 
-    let isResizing = false;
-    let startX = 0;
-    let startWidth = 0;
+  // Convert pixel widths to percentages for react-resizable-panels
+  // Assuming a base container width of around 1200px for initial sizing
+  const leftSidebarPercent = (leftSidebarWidth / 1200) * 100;
+  const rightSidebarPercent = (rightSidebarWidth / 1200) * 100;
 
-    const handleMouseDown = (e: MouseEvent) => {
-      isResizing = true;
-      startX = e.clientX;
-      startWidth = leftSidebarWidth;
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-    };
+  // Handle left sidebar resize
+  const handleLeftResize = useCallback(
+    (size: PanelSize) => {
+      if (onLeftSidebarWidthChange) {
+        onLeftSidebarWidthChange(Math.round(size.inPixels));
+      }
+    },
+    [onLeftSidebarWidthChange]
+  );
 
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
-      const deltaX = e.clientX - startX;
-      const newWidth = Math.min(Math.max(startWidth + deltaX, 150), 400);
-      onLeftSidebarWidthChange(newWidth);
-    };
+  // Handle right sidebar resize
+  const handleRightResize = useCallback(
+    (size: PanelSize) => {
+      if (onRightSidebarWidthChange) {
+        onRightSidebarWidthChange(Math.round(size.inPixels));
+      }
+    },
+    [onRightSidebarWidthChange]
+  );
 
-    const handleMouseUp = () => {
-      isResizing = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
+  // Handle bottom panel resize
+  const handleBottomResize = useCallback(
+    (size: PanelSize) => {
+      if (onBottomPanelHeightChange) {
+        onBottomPanelHeightChange(Math.round(size.inPixels));
+      }
+    },
+    [onBottomPanelHeightChange]
+  );
 
-    resizeEl.addEventListener('mousedown', handleMouseDown);
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      resizeEl.removeEventListener('mousedown', handleMouseDown);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [leftSidebarWidth, onLeftSidebarWidthChange]);
-
-  // Right sidebar resize
-  useEffect(() => {
-    const resizeEl = rightResizeRef.current;
-    if (!resizeEl || !onRightSidebarWidthChange) return;
-
-    let isResizing = false;
-    let startX = 0;
-    let startWidth = 0;
-
-    const handleMouseDown = (e: MouseEvent) => {
-      isResizing = true;
-      startX = e.clientX;
-      startWidth = rightSidebarWidth;
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
-      const deltaX = startX - e.clientX;
-      const newWidth = Math.min(Math.max(startWidth + deltaX, 250), 500);
-      onRightSidebarWidthChange(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      isResizing = false;
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-
-    resizeEl.addEventListener('mousedown', handleMouseDown);
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-
-    return () => {
-      resizeEl.removeEventListener('mousedown', handleMouseDown);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [rightSidebarWidth, onRightSidebarWidthChange]);
-
-  const showLeftSidebar = activeActivity === 'explorer' || activeActivity === 'search' || activeActivity === 'git';
+  // Toggle bottom panel
+  const handleBottomPanelToggle = useCallback(() => {
+    if (onBottomPanelToggle) {
+      onBottomPanelToggle();
+    }
+    const panel = bottomPanelRef.current as PanelImperativeHandle | null;
+    if (panel) {
+      if (isBottomPanelOpen) {
+        panel.collapse();
+      } else {
+        panel.expand();
+      }
+    }
+  }, [isBottomPanelOpen, onBottomPanelToggle, bottomPanelRef]);
 
   return (
-    <div className={cn('flex h-full', className)}>
-      {/* Activity Bar */}
+    <div className={cn('flex h-full ide-layout-container', className)}>
+      {/* Activity Bar - fixed width */}
       <ActivityBar
         activeActivity={activeActivity}
         onActivityChange={onActivityChange}
       />
 
-      {/* Left Sidebar */}
-      {showLeftSidebar && leftSidebar && (
-        <>
-          <div
-            className="flex-shrink-0 overflow-hidden border-r border-[var(--color-border)]"
-            style={{ width: leftSidebarWidth }}
-          >
-            {leftSidebar}
-          </div>
-          {/* Resize handle */}
-          <div
-            ref={leftResizeRef}
-            className="w-1 bg-[var(--color-border)] hover:bg-[var(--color-accent-primary)]/50 cursor-col-resize flex items-center justify-center flex-shrink-0"
-          >
-            <GripVertical className="h-4 w-4 text-[var(--color-text-muted)]" />
-          </div>
-        </>
-      )}
-
-      {/* Main Content Area (Editor + Bottom Panel) */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Editor Area or Maximized Claude Terminal */}
-        <div className="flex-1 min-h-0 overflow-hidden">
-          {isClaudeMaximized && maximizedContent ? maximizedContent : children}
-        </div>
-
-        {/* Bottom Panel */}
-        {!isClaudeMaximized && bottomPanel && onBottomPanelToggle && onBottomPanelTabChange && onBottomPanelHeightChange && (
-          <BottomPanel
-            isOpen={isBottomPanelOpen}
-            onToggle={onBottomPanelToggle}
-            activeTab={bottomPanelTab}
-            onTabChange={onBottomPanelTabChange}
-            height={bottomPanelHeight}
-            onHeightChange={onBottomPanelHeightChange}
-          >
-            {bottomPanel}
-          </BottomPanel>
+      {/* Main resizable area */}
+      <Group
+        orientation="horizontal"
+        className="flex-1"
+      >
+        {/* Left Sidebar Panel */}
+        {showLeftSidebar && leftSidebar && (
+          <>
+            <Panel
+              id="left-sidebar"
+              defaultSize={leftSidebarPercent}
+              minSize={10}
+              maxSize={30}
+              onResize={handleLeftResize}
+              className="overflow-hidden"
+            >
+              <div className="h-full border-r border-[var(--color-border)]">
+                {leftSidebar}
+              </div>
+            </Panel>
+            <VerticalResizeHandle />
+          </>
         )}
-      </div>
 
-      {/* Right Sidebar (Chat) - hidden when maximized, uses CSS visibility to preserve PTY session */}
-      {!isClaudeMaximized && rightSidebar && (
-        <div className={cn('flex', !isRightSidebarOpen && 'hidden')}>
-          {/* Resize handle */}
-          <div
-            ref={rightResizeRef}
-            className="w-1 bg-[var(--color-border)] hover:bg-[var(--color-accent-primary)]/50 cursor-col-resize flex items-center justify-center flex-shrink-0"
-          >
-            <GripVertical className="h-4 w-4 text-[var(--color-text-muted)]" />
-          </div>
-          <div
-            className="flex-shrink-0 overflow-hidden border-l border-[var(--color-border)]"
-            style={{ width: rightSidebarWidth }}
-          >
-            {rightSidebar}
-          </div>
-        </div>
-      )}
+        {/* Main Content Panel (Editor + Bottom) */}
+        <Panel
+          id="main-content"
+          defaultSize={100 - leftSidebarPercent - rightSidebarPercent}
+          minSize={30}
+        >
+          <Group orientation="vertical">
+            {/* Editor Area */}
+            <Panel
+              id="editor"
+              defaultSize={isBottomPanelOpen ? 70 : 100}
+              minSize={20}
+            >
+              <div className="h-full overflow-hidden">
+                {isClaudeMaximized && maximizedContent
+                  ? maximizedContent
+                  : children}
+              </div>
+            </Panel>
+
+            {/* Bottom Panel */}
+            {!isClaudeMaximized &&
+              bottomPanel &&
+              onBottomPanelToggle &&
+              onBottomPanelTabChange && (
+                <>
+                  <HorizontalResizeHandle />
+                  <Panel
+                    id="bottom-panel"
+                    panelRef={bottomPanelRef}
+                    defaultSize={isBottomPanelOpen ? 30 : 0}
+                    minSize={0}
+                    maxSize={50}
+                    collapsible
+                    collapsedSize={0}
+                    onResize={handleBottomResize}
+                  >
+                    <div className="h-full flex flex-col bg-[var(--color-bg-secondary)]">
+                      <BottomPanelHeader
+                        isOpen={isBottomPanelOpen}
+                        onToggle={handleBottomPanelToggle}
+                        activeTab={bottomPanelTab}
+                        onTabChange={onBottomPanelTabChange}
+                      />
+                      <div className="flex-1 overflow-hidden">{bottomPanel}</div>
+                    </div>
+                  </Panel>
+                </>
+              )}
+          </Group>
+        </Panel>
+
+        {/* Right Sidebar (Chat) */}
+        {!isClaudeMaximized && rightSidebar && isRightSidebarOpen && (
+          <>
+            <VerticalResizeHandle />
+            <Panel
+              id="right-sidebar"
+              defaultSize={rightSidebarPercent}
+              minSize={15}
+              maxSize={40}
+              onResize={handleRightResize}
+              className="overflow-hidden"
+            >
+              <div className="h-full border-l border-[var(--color-border)]">
+                {rightSidebar}
+              </div>
+            </Panel>
+          </>
+        )}
+      </Group>
     </div>
   );
 }
