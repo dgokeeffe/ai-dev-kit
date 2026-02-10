@@ -147,6 +147,51 @@ def _find_app_yaml(project_dir: Path) -> Optional[Path]:
   return None
 
 
+def detect_deploy_command(
+  project_dir: Path,
+  app_name: str = 'my-app',
+  target: str = 'dev',
+) -> Optional[dict]:
+  """Detect which deploy command to use based on project config files.
+
+  Args:
+      project_dir: Project directory to analyze
+      app_name: App name for `databricks apps deploy` command
+      target: Target for `databricks bundle deploy` command
+
+  Returns:
+      dict with 'type' ('apps' or 'bundle'), 'command' (list of args), and 'config_file'
+      Returns None if no config file found
+  """
+  app_yaml = project_dir / 'app.yaml'
+  databricks_yml = project_dir / 'databricks.yml'
+
+  # Prefer app.yaml for simple Databricks Apps
+  if app_yaml.exists():
+    return {
+      'type': 'apps',
+      'command': [
+        'databricks',
+        'apps',
+        'deploy',
+        app_name,
+        '--source-code-path',
+        str(project_dir),
+      ],
+      'config_file': str(app_yaml),
+    }
+
+  # Fall back to databricks.yml for Asset Bundles
+  if databricks_yml.exists():
+    return {
+      'type': 'bundle',
+      'command': ['databricks', 'bundle', 'deploy', '--target', target],
+      'config_file': str(databricks_yml),
+    }
+
+  return None
+
+
 def _generate_app_name(project_name: str, target: str) -> str:
   """Generate app name from project name and target.
 
@@ -255,27 +300,40 @@ async def _run_deploy_command(
   project_dir: Path,
   host: str,
   token: str,
+  app_name: str = 'my-app',
   target: str = 'dev',
   variables: Optional[dict[str, str]] = None,
 ) -> AsyncIterator[dict]:
-  """Run databricks bundle deploy and stream output.
+  """Run deploy command and stream output.
+
+  Detects whether to use `databricks apps deploy` or `databricks bundle deploy`
+  based on the config files present in the project directory.
 
   Args:
       project_id: Project UUID for status tracking
-      project_dir: Project directory containing databricks.yml
+      project_dir: Project directory
       host: Databricks workspace URL
       token: Databricks access token
-      target: DAB target (dev, staging, prod)
-      variables: Optional bundle variables
+      app_name: App name for `databricks apps deploy`
+      target: DAB target for `databricks bundle deploy`
+      variables: Optional bundle variables (only for bundle deploy)
 
   Yields:
       Log entries as dicts
   """
-  # Build command
-  cmd = ['databricks', 'bundle', 'deploy', '--target', target]
+  # Detect deploy command type
+  deploy_config = detect_deploy_command(project_dir, app_name, target)
 
-  # Add variables
-  if variables:
+  if deploy_config is None:
+    error_msg = 'No app.yaml or databricks.yml found in project'
+    await _add_deploy_log(project_id, 'error', error_msg)
+    yield {'timestamp': datetime.utcnow().isoformat(), 'level': 'error', 'message': error_msg}
+    raise Exception(error_msg)
+
+  cmd = deploy_config['command']
+
+  # Add variables only for bundle deploy
+  if deploy_config['type'] == 'bundle' and variables:
     for key, value in variables.items():
       cmd.extend(['--var', f'{key}={value}'])
 
@@ -376,8 +434,9 @@ async def get_deployment_history(request: Request, project_id: str):
 async def deploy_project(request: Request, project_id: str, config: DeployConfig = None):
   """Deploy a project to Databricks Apps.
 
-  Uses `databricks bundle deploy` to deploy the project.
-  Requires a databricks.yml or app.yaml file in the project directory.
+  Automatically selects the appropriate deploy command based on config files:
+  - app.yaml -> `databricks apps deploy <app-name> --source-code-path <dir>`
+  - databricks.yml -> `databricks bundle deploy --target <target>`
 
   Args:
       request: FastAPI request object
@@ -456,6 +515,7 @@ async def deploy_project(request: Request, project_id: str, config: DeployConfig
         project_dir=project_dir,
         host=host,
         token=token,
+        app_name=app_name,
         target=config.target,
         variables=config.variables,
       ):
