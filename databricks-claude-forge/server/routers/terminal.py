@@ -109,16 +109,17 @@ def _is_command_allowed(executable: str) -> bool:
   """Check if the command executable is allowed.
 
   Args:
-      executable: The command name
+      executable: The command name (must not contain path separators)
 
   Returns:
       True if allowed, False otherwise
   """
-  # Get the base command name (handle paths like /usr/bin/python)
-  base_cmd = os.path.basename(executable)
+  # Reject paths - only allow bare command names to prevent whitelist bypass
+  # (e.g., /tmp/evil/python3 would bypass the check if we only looked at basename)
+  if '/' in executable or '\\' in executable:
+    return False
 
-  # Check against allowed commands
-  return base_cmd in ALLOWED_COMMANDS
+  return executable in ALLOWED_COMMANDS
 
 
 @router.post('/projects/{project_id}/terminal/execute')

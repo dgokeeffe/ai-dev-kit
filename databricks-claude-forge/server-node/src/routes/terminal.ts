@@ -67,11 +67,17 @@ terminalRouter.post('/projects/:projectId/terminal/execute', (req: Request, res:
     }
 
     const { executable, args } = parseCommand(command.trim());
-    const baseName = path.basename(executable);
 
-    if (!ALLOWED_COMMANDS.has(baseName)) {
+    // Reject any path separators - force PATH resolution to prevent whitelist bypass
+    if (executable.includes('/') || executable.includes('\\')) {
       return res.status(403).json({
-        detail: `Command "${baseName}" is not allowed. Allowed: ${Array.from(ALLOWED_COMMANDS).sort().join(', ')}`,
+        detail: `Command not allowed: absolute or relative paths not permitted. Use command name only (e.g., 'python3' not '/usr/bin/python3')`,
+      });
+    }
+
+    if (!ALLOWED_COMMANDS.has(executable)) {
+      return res.status(403).json({
+        detail: `Command "${executable}" is not allowed. Allowed: ${Array.from(ALLOWED_COMMANDS).sort().join(', ')}`,
       });
     }
 

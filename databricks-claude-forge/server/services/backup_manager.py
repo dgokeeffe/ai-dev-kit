@@ -71,7 +71,7 @@ async def create_backup(project_id: str) -> bool:
     try:
       with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zf:
         for file_path in project_dir.rglob('*'):
-          if file_path.is_file():
+          if file_path.is_file() and not file_path.is_symlink():
             # Skip files larger than 100MB to prevent OOM
             try:
               file_size = file_path.stat().st_size
@@ -156,6 +156,13 @@ async def restore_backup(project_id: str) -> bool:
   buffer = BytesIO(backup_data)
   with zipfile.ZipFile(buffer, 'r') as zf:
     zf.extractall(project_dir)
+
+    # Remove any symlinks that may have been extracted from potentially malicious archives
+    for member in zf.namelist():
+      extracted_path = project_dir / member
+      if extracted_path.is_symlink():
+        extracted_path.unlink()
+        logger.warning(f'Removed symlink from restored backup: {member}')
 
   logger.info(f'Restored project {project_id} from backup')
   return True

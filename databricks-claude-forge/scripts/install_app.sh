@@ -1,18 +1,18 @@
 #!/bin/bash
-# End-to-end install script for git-backed Databricks Builder App deployment.
+# Install and deploy the Databricks Claude Forge app (databricks-claude-forge).
 #
-# This script chains together every step needed to go from zero to a running
-# app deployed from a Git repository:
+# Provisions all infrastructure and deploys the app from a Git repository
+# in a single command. Run from the databricks-claude-forge directory.
 #
 #   1. Validate prerequisites (CLI, auth, git)
 #   2. Provision infrastructure via DABs (Lakebase + App with git_repository)
 #   3. Generate a PAT token and store it as an app secret
-#   4. Deploy the app from Git (platform builds frontend automatically)
+#   4. Deploy databricks-claude-forge from Git (frontend built automatically)
 #   5. Grant Lakebase permissions (create role + DATABRICKS_SUPERUSER)
 #   6. Wait for the app to be healthy
 #
 # Usage:
-#   ./scripts/install_git.sh <app-name> [options]
+#   ./scripts/install_app.sh <app-name> [options]
 #
 # Safe to re-run — each step is idempotent.
 
@@ -49,7 +49,7 @@ usage() {
   echo ""
   echo -e "${BOLD}Usage:${NC} $0 <app-name> [options]"
   echo ""
-  echo "End-to-end install for a git-backed Databricks Builder App."
+  echo "Install and deploy the Databricks Claude Forge app from Git."
   echo ""
   echo -e "${BOLD}Arguments:${NC}"
   echo "  app-name                 Name for the Databricks App (required)"
@@ -124,7 +124,7 @@ fi
 # ── Banner ───────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║      Databricks Builder App — Git Install                   ║${NC}"
+echo -e "${BLUE}║      Databricks Claude Forge — Install                      ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  App Name:       ${GREEN}${APP_NAME}${NC}"

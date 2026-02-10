@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from ..services.backup_manager import ensure_project_directory
 from ..services.storage import ProjectStorage
 from ..services.user import get_current_user, get_workspace_url
+from .files import _validate_path
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -192,7 +193,7 @@ async def git_diff(
 
   # If no diff (e.g., untracked file), show the full file content
   if not stdout.strip():
-    file_path = project_dir / file
+    file_path = _validate_path(project_dir, file)
     if file_path.exists() and file_path.is_file():
       try:
         content = file_path.read_text(encoding='utf-8')
