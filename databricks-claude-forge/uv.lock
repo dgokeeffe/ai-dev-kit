@@ -541,6 +541,8 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "click" },
+    { name = "httpx" },
+    { name = "pytest" },
     { name = "ruff" },
     { name = "watchdog", extra = ["watchmedo"] },
 ]
@@ -582,6 +584,8 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "click", specifier = ">=8.1.8" },
+    { name = "httpx", specifier = ">=0.28.0" },
+    { name = "pytest", specifier = ">=9.0.0" },
     { name = "ruff", specifier = ">=0.9.6" },
     { name = "watchdog", extras = ["watchmedo"], specifier = ">=6.0.0" },
 ]
