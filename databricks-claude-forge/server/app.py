@@ -206,11 +206,14 @@ app.include_router(preview_router, prefix=API_PREFIX, tags=['preview'])
 app.include_router(health_router, prefix=API_PREFIX, tags=['health'])
 
 # Production: Serve Vite static build with SPA fallback
+# Can be disabled with SERVE_STATIC_FILES=false for backend-only mode in dual-app deployment
+serve_static = os.environ.get('SERVE_STATIC_FILES', 'true').lower() != 'false'
+
 # Check both paths: 'client/out' (local dev) and 'client' (deployed via deploy.sh)
 build_path = Path('.') / 'client/out'
 if not build_path.exists():
   build_path = Path('.') / 'client'
-if build_path.exists() and (build_path / 'index.html').exists():
+if serve_static and build_path.exists() and (build_path / 'index.html').exists():
   logger.info(f'Serving static files from {build_path} with SPA fallback')
 
   @app.get('/{path:path}')
@@ -224,6 +227,8 @@ if build_path.exists() and (build_path / 'index.html').exists():
       return FileResponse(file_path)
     # Fall back to index.html for client-side routing
     return FileResponse(build_path / 'index.html')
+elif not serve_static:
+  logger.info('Static file serving disabled (SERVE_STATIC_FILES=false) - backend-only mode')
 else:
   logger.warning(
     f'Build directory {build_path} not found. '

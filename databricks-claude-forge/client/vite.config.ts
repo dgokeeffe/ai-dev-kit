@@ -1,9 +1,13 @@
 import path from "path";
 import react from "@vitejs/plugin-react-swc";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // Load env vars - used for dual-app deployment with VITE_BACKEND_*_URL
+  const env = loadEnv(mode, process.cwd(), 'VITE_');
+  return {
   plugins: [react()],
+  envDir: process.cwd(),
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -52,4 +56,5 @@ export default defineConfig({
       },
     },
   },
+};
 });
