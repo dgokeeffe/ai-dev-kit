@@ -1,6 +1,11 @@
 # Databricks AI Dev Kit
 .ai-dev-kit/
 
+# Agent/IDE working files
+.claude/
+.claude.json
+.cursor/
+
 
 # Python
 __pycache__/
@@ -63,6 +68,9 @@ mcp.json
 
 # Generated test files
 databricks-tools-core/tests/integration/pdf/generated_pdf/
+
+# Node
+node_modules/
 
 # Python cache
 __pycache__/
