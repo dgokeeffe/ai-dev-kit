@@ -145,7 +145,7 @@ def _get_databricks_credentials_from_headers(request: Request) -> tuple[str | No
   if host and token:
     if not host.startswith('http'):
       host = f'https://{host}'
-    logger.info(f'PTY: Using production credentials (X-Forwarded-Access-Token)')
+    logger.info('PTY: Using production credentials (X-Forwarded-Access-Token)')
     return host, token
 
   # Fall back to env vars (development only)
