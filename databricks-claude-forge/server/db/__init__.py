@@ -16,7 +16,7 @@ from .database import (
   stop_token_refresh,
   test_database_connection,
 )
-from .models import Base, Conversation, Execution, Message, Project
+from .models import Base, Conversation, Execution, Message, Project, UserSettings
 
 __all__ = [
   'Base',
@@ -24,6 +24,7 @@ __all__ = [
   'Execution',
   'Message',
   'Project',
+  'UserSettings',
   'create_tables',
   'ensure_table_permissions',
   'get_engine',

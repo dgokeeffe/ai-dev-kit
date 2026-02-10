@@ -828,3 +828,99 @@ export async function checkBackendHealth(backendUrl: string): Promise<HealthStat
   const response = await fetch(`${backendUrl}/health`);
   return handleResponse<HealthStatus>(response);
 }
+
+// =============================================================================
+// GitHub OAuth API
+// =============================================================================
+
+export interface DeviceFlowResponse {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+}
+
+export interface DeviceFlowPollResponse {
+  status: 'pending' | 'success' | 'error';
+  username?: string;
+  error?: string;
+}
+
+export interface GitHubStatus {
+  connected: boolean;
+  username?: string;
+}
+
+export async function startGitHubDeviceFlow(): Promise<DeviceFlowResponse> {
+  const response = await fetch(`${API_BASE}/github/device-flow/start`, {
+    method: 'POST',
+  });
+  return handleResponse<DeviceFlowResponse>(response);
+}
+
+export async function pollGitHubDeviceFlow(deviceCode: string): Promise<DeviceFlowPollResponse> {
+  const response = await fetch(`${API_BASE}/github/device-flow/poll`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_code: deviceCode }),
+  });
+  return handleResponse<DeviceFlowPollResponse>(response);
+}
+
+export async function getGitHubStatus(): Promise<GitHubStatus> {
+  const response = await fetch(`${API_BASE}/github/status`);
+  return handleResponse<GitHubStatus>(response);
+}
+
+export async function disconnectGitHub(): Promise<void> {
+  const response = await fetch(`${API_BASE}/github/disconnect`, {
+    method: 'POST',
+  });
+  await handleResponse(response);
+}
+
+// =============================================================================
+// Git Remotes API
+// =============================================================================
+
+export interface GitRemote {
+  name: string;
+  url: string;
+}
+
+export async function getGitRemotes(projectId: string): Promise<GitRemote[]> {
+  const response = await fetch(`${API_BASE}/projects/${projectId}/git/remotes`);
+  const data = await handleResponse<{ remotes: GitRemote[] }>(response);
+  return data.remotes;
+}
+
+export async function addGitRemote(
+  projectId: string,
+  name: string,
+  url: string
+): Promise<{ action: string }> {
+  const response = await fetch(`${API_BASE}/projects/${projectId}/git/remotes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, url }),
+  });
+  return handleResponse<{ action: string }>(response);
+}
+
+// =============================================================================
+// Workspace Sync API
+// =============================================================================
+
+export interface SyncToWorkspaceResponse {
+  success: boolean;
+  workspace_path: string;
+  output: string;
+}
+
+export async function syncToWorkspace(projectId: string): Promise<SyncToWorkspaceResponse> {
+  const response = await fetch(`${API_BASE}/projects/${projectId}/sync-to-workspace`, {
+    method: 'POST',
+  });
+  return handleResponse<SyncToWorkspaceResponse>(response);
+}

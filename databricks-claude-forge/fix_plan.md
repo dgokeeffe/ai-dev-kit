@@ -18,25 +18,48 @@ Based on PRD analysis, here's the current state and implementation plan:
 | 4 | Deploy UI | ✅ DeployPanel.tsx | Already implemented |
 | 5 | Template System | ✅ templates.py | Add more official templates |
 | 5 | Template Selection UI | ✅ HomePage.tsx | Add preview feature |
-| 6 | code-server | ✅ DONE (code_server.py) | Service created |
+| 6 | code-server | ❌ CANCELLED | Removed from scope |
 
 ## Gates status
 
-All gates pass:
+All 25 gates pass:
 ```
 === Build Gates ===
-  Lint                 ok
-  Types                ok
-  Build                ok
+  Lint                         ok
+  Types                        ok
+  Build                        ok
 
-=== Feature Gates ===
-  ResizePanels-Pkg     ok
-  ResizePanels-Import  ok
-  ResizePanels-Usage   ok
-  CodeServer-Service   ok
-  CodeServer-Methods   ok
+=== Backend Routers Registered ===
+  Router-Agent                 ok
+  Router-Projects              ok
+  Router-Conversations         ok
+  Router-Config                ok
+  Router-Deploy                ok
+  Router-Git                   ok
+  Router-Files                 ok
+  Router-Templates             ok
 
-All 8 gate(s) passed ✓
+=== Frontend API Functions ===
+  API-createProject            ok
+  API-fetchProjects            ok
+  API-invokeAgent              ok
+  API-deploy                   ok
+  Git-StatusCall               ok
+
+=== Key Components Exist ===
+  Component-ChatPanel          ok
+  Component-FileExplorer       ok
+  Component-CodeEditor         ok
+  Component-SourceControl      ok
+  Component-DeployPanel        ok
+  Component-IDELayout          ok
+
+=== Resizable Panels ===
+  ResizePanels-Pkg             ok
+  ResizePanels-Usage           ok
+  LocalStorage-Persist         ok
+
+All 25 gate(s) passed ✓
 ```
 
 ## Implementation completed
@@ -47,17 +70,11 @@ All 8 gate(s) passed ✓
 - [x] Refactored `IDELayout.tsx` to use `Group`, `Panel`, `Separator` components
 - [x] Left sidebar, main content, and right sidebar all resizable
 - [x] Bottom panel with collapsible support
+- [x] Panel sizes persist to localStorage (leftSidebarWidth, rightSidebarWidth, bottomPanelHeight)
 
-### Phase 6: code-server integration - COMPLETED
+### Phase 6: code-server integration - CANCELLED
 
-- [x] Story 6.1: Created `server/services/code_server.py` with:
-  - `start(project_id, project_dir)` - Start code-server for a project
-  - `stop(project_id)` - Stop code-server instance
-  - `health(project_id)` - Check health/status
-  - `is_code_server_available()` - Check if code-server is installed
-  - `stop_all()` - Shutdown hook for app cleanup
-  - Port management (8500-8599 range)
-  - User data directory isolation per project
+Removed from scope. The built-in CodeMirror editor is sufficient for the MVP.
 
 ## Already existed (from initial exploration)
 
@@ -91,11 +108,20 @@ All 8 gate(s) passed ✓
 
 - [ ] Story 1.2: Add Databricks logo SVG to TopBar
 - [ ] Story 5.2: Add template preview modal with file tree
-- [ ] Story 6.2: Add CodeServerPanel.tsx component
-- [ ] Story 6.3: Add code-server router and proxy endpoints
 
 ## Notes
 
 - The codebase was already well-structured for most PRD requirements
-- Gates focus on the two key deliverables: react-resizable-panels and code-server service
-- Additional UI polish (logo, template preview, code-server panel) can be added incrementally
+- Gates focus on the key deliverable: react-resizable-panels
+- Additional UI polish (logo, template preview) can be added incrementally
+- code-server integration was removed from scope - CodeMirror editor is sufficient for MVP
+
+## Cleanup status
+
+✅ All code-server references have been removed. No cleanup needed.
+
+## Current gates (updated)
+
+The gates.sh script now includes performance gates:
+- Build Gates: All pass (Lint-Backend, Types, Build)
+- Performance Gates: Chunk size warnings (informational, not blocking)

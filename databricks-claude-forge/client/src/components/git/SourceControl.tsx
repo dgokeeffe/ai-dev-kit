@@ -14,6 +14,8 @@ import {
   Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { GitHubConnect } from './GitHubConnect';
+import { WorkspaceSync } from './WorkspaceSync';
 
 const API_BASE = '/api';
 
@@ -322,6 +324,12 @@ export function SourceControl({ projectId, onOpenDiff, className = '' }: SourceC
             <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
           </button>
         </div>
+      </div>
+
+      {/* GitHub Connect + Workspace Sync */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border)] flex-shrink-0 gap-2">
+        <GitHubConnect />
+        <WorkspaceSync projectId={projectId} />
       </div>
 
       {/* Branch + Push/Pull */}

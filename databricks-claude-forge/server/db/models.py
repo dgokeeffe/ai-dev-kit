@@ -257,3 +257,29 @@ class DeploymentHistory(Base):
       'started_at': self.started_at.isoformat() if self.started_at else None,
       'completed_at': self.completed_at.isoformat() if self.completed_at else None,
     }
+
+
+class UserSettings(Base):
+  """User settings - stores per-user configuration including GitHub tokens."""
+
+  __tablename__ = 'user_settings'
+
+  user_email: Mapped[str] = mapped_column(String(255), primary_key=True)
+  github_token_encrypted: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+  github_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+  created_at: Mapped[datetime] = mapped_column(
+    DateTime(timezone=True), default=utc_now, nullable=False
+  )
+  updated_at: Mapped[datetime] = mapped_column(
+    DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False
+  )
+
+  def to_dict(self) -> dict[str, Any]:
+    """Convert to dictionary (excludes encrypted token for security)."""
+    return {
+      'user_email': self.user_email,
+      'github_username': self.github_username,
+      'github_connected': self.github_token_encrypted is not None,
+      'created_at': self.created_at.isoformat() if self.created_at else None,
+      'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+    }

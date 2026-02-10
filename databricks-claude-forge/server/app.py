@@ -37,6 +37,7 @@ from .routers import (  # noqa: E402
   deploy_router,
   files_router,
   git_router,
+  github_router,
   health_router,
   preview_router,
   projects_router,
@@ -197,6 +198,7 @@ app.include_router(skills_router, prefix=API_PREFIX, tags=['skills'])
 app.include_router(templates_router, prefix=API_PREFIX, tags=['templates'])
 app.include_router(files_router, prefix=API_PREFIX, tags=['files'])
 app.include_router(git_router, prefix=API_PREFIX, tags=['git'])
+app.include_router(github_router, prefix=API_PREFIX, tags=['github'])
 app.include_router(deploy_router, prefix=API_PREFIX, tags=['deploy'])
 app.include_router(terminal_router, prefix=API_PREFIX, tags=['terminal'])
 app.include_router(pty_router, prefix=API_PREFIX, tags=['pty'])

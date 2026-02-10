@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from ..services.backup_manager import ensure_project_directory
 from ..services.storage import ProjectStorage
 from ..services.user import get_current_user, get_workspace_url
+from ..services.user_settings import UserSettingsStorage
 from .files import _validate_path
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,13 @@ class CheckoutRequest(BaseModel):
   """Request model for switching branches."""
 
   branch: str
+
+
+class RemoteRequest(BaseModel):
+  """Request model for adding/updating a remote."""
+
+  name: str = 'origin'
+  url: str
 
 
 # --- Endpoints ---
@@ -299,26 +307,146 @@ async def git_checkout(request: Request, project_id: str, body: CheckoutRequest)
   return {'success': True, 'branch': body.branch}
 
 
-@router.post('/projects/{project_id}/git/push')
-async def git_push(request: Request, project_id: str):
-  """Push to remote."""
+@router.get('/projects/{project_id}/git/remotes')
+async def git_remotes(request: Request, project_id: str):
+  """List git remotes."""
   project_dir = await _get_project_dir(request, project_id)
   await _ensure_git_repo(project_dir)
 
-  stdout, stderr, rc = await _run_git(project_dir, 'push')
+  stdout, stderr, rc = await _run_git(project_dir, 'remote', '-v')
   if rc != 0:
-    raise HTTPException(status_code=500, detail=f'git push failed: {stderr}')
+    raise HTTPException(status_code=500, detail=f'git remote failed: {stderr}')
+
+  remotes = {}
+  for line in stdout.splitlines():
+    if not line.strip():
+      continue
+    parts = line.split()
+    if len(parts) >= 2:
+      name = parts[0]
+      url = parts[1]
+      if name not in remotes:
+        remotes[name] = {'name': name, 'url': url}
+
+  return {'remotes': list(remotes.values())}
+
+
+@router.post('/projects/{project_id}/git/remotes')
+async def git_add_remote(request: Request, project_id: str, body: RemoteRequest):
+  """Add or update a git remote."""
+  project_dir = await _get_project_dir(request, project_id)
+  await _ensure_git_repo(project_dir)
+
+  if not body.url.strip():
+    raise HTTPException(status_code=400, detail='Remote URL cannot be empty')
+
+  # Check if remote exists
+  stdout, stderr, rc = await _run_git(project_dir, 'remote', 'get-url', body.name)
+  if rc == 0:
+    # Remote exists, update it
+    stdout, stderr, rc = await _run_git(
+      project_dir, 'remote', 'set-url', body.name, body.url
+    )
+    action = 'updated'
+  else:
+    # Remote doesn't exist, add it
+    stdout, stderr, rc = await _run_git(project_dir, 'remote', 'add', body.name, body.url)
+    action = 'added'
+
+  if rc != 0:
+    raise HTTPException(status_code=500, detail=f'git remote failed: {stderr}')
+
+  return {'success': True, 'action': action, 'name': body.name, 'url': body.url}
+
+
+async def _run_git_with_token(
+  project_dir: Path, token: str | None, *args: str
+) -> tuple[str, str, int]:
+  """Run a git command with optional GitHub token authentication.
+
+  Uses GIT_ASKPASS to provide the token when prompted for credentials.
+  """
+  env = {**os.environ, 'GIT_TERMINAL_PROMPT': '0'}
+
+  if token:
+    # Create a simple script that echoes the token
+    # GIT_ASKPASS is called with a prompt, we just return the token
+    askpass_script = f'#!/bin/sh\necho "{token}"'
+    askpass_path = project_dir / '.git_askpass.sh'
+    askpass_path.write_text(askpass_script)
+    askpass_path.chmod(0o700)
+    env['GIT_ASKPASS'] = str(askpass_path)
+    env['GIT_USERNAME'] = 'x-access-token'  # GitHub accepts any username with token
+
+  try:
+    proc = await asyncio.create_subprocess_exec(
+      'git',
+      *args,
+      cwd=str(project_dir),
+      stdout=asyncio.subprocess.PIPE,
+      stderr=asyncio.subprocess.PIPE,
+      env=env,
+    )
+    stdout, stderr = await proc.communicate()
+    return (
+      stdout.decode('utf-8', errors='replace'),
+      stderr.decode('utf-8', errors='replace'),
+      proc.returncode or 0,
+    )
+  finally:
+    # Clean up askpass script
+    if token:
+      askpass_path = project_dir / '.git_askpass.sh'
+      if askpass_path.exists():
+        askpass_path.unlink()
+
+
+@router.post('/projects/{project_id}/git/push')
+async def git_push(request: Request, project_id: str):
+  """Push to remote.
+
+  If the user has connected GitHub, their token will be used for authentication.
+  """
+  project_dir = await _get_project_dir(request, project_id)
+  await _ensure_git_repo(project_dir)
+  user_email = await get_current_user(request)
+
+  # Get GitHub token if available
+  storage = UserSettingsStorage(user_email)
+  token = await storage.get_github_token()
+
+  # Get current branch
+  branch_out, _, _ = await _run_git(project_dir, 'rev-parse', '--abbrev-ref', 'HEAD')
+  current_branch = branch_out.strip() or 'main'
+
+  # Try push with upstream tracking
+  stdout, stderr, rc = await _run_git_with_token(
+    project_dir, token, 'push', '-u', 'origin', current_branch
+  )
+  if rc != 0:
+    # If upstream already set, try simple push
+    stdout, stderr, rc = await _run_git_with_token(project_dir, token, 'push')
+    if rc != 0:
+      raise HTTPException(status_code=500, detail=f'git push failed: {stderr}')
 
   return {'success': True, 'output': (stdout + stderr).strip()}
 
 
 @router.post('/projects/{project_id}/git/pull')
 async def git_pull(request: Request, project_id: str):
-  """Pull from remote."""
+  """Pull from remote.
+
+  If the user has connected GitHub, their token will be used for authentication.
+  """
   project_dir = await _get_project_dir(request, project_id)
   await _ensure_git_repo(project_dir)
+  user_email = await get_current_user(request)
 
-  stdout, stderr, rc = await _run_git(project_dir, 'pull')
+  # Get GitHub token if available
+  storage = UserSettingsStorage(user_email)
+  token = await storage.get_github_token()
+
+  stdout, stderr, rc = await _run_git_with_token(project_dir, token, 'pull')
   if rc != 0:
     raise HTTPException(status_code=500, detail=f'git pull failed: {stderr}')
 
