@@ -25,6 +25,8 @@ env:
     value: "builder-app-db"
   - name: LAKEBASE_DATABASE_NAME
     value: "databricks_postgres"
+  - name: LAKEBASE_USERNAME
+    value: "8666503f-3010-4d74-9f28-3e8f3a3161a0"
   - name: LLM_PROVIDER
     value: "DATABRICKS"
   - name: DATABRICKS_MODEL

@@ -108,7 +108,8 @@ try:
         print(f'  Updated membership_role: {membership or \"(none)\"} -> {new_membership}')
 
 except Exception as e:
-    if 'does not exist' in str(e) or '404' in str(e) or 'NOT_FOUND' in str(e):
+    err_str = str(e).lower()
+    if 'does not exist' in err_str or '404' in err_str or 'not_found' in err_str or 'not found' in err_str:
         # Role does not exist yet - create it
         print(f'  Role does not exist, creating with DATABRICKS_SUPERUSER...')
         resp = w.api_client.do(
