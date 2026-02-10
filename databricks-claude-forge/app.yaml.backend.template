@@ -1,0 +1,63 @@
+# Backend-only app configuration for dual-app deployment
+# This template is used for backend instances that serve API only (no static files)
+# Deploy multiple instances with different APP_INSTANCE values for load distribution
+
+command:
+  - "uvicorn"
+  - "server.app:app"
+  - "--host"
+  - "0.0.0.0"
+  - "--port"
+  - "$DATABRICKS_APP_PORT"
+
+env:
+  # Instance identifier for logging and debugging
+  - name: APP_INSTANCE
+    value: "${APP_INSTANCE:-backend-1}"
+
+  # Core app settings
+  - name: APP_TITLE
+    value: "Vibe Coding Workshop"
+  - name: PARTNER_NAME
+    value: ""
+  - name: ENV
+    value: "production"
+  - name: PROJECTS_BASE_DIR
+    value: "./projects"
+  - name: PYTHONPATH
+    value: "./packages"
+
+  # Skills configuration
+  - name: ENABLED_SKILLS
+    value: "agent-bricks,aibi-dashboards,asset-bundles,databricks-app-apx,databricks-app-python,databricks-config,databricks-docs,databricks-jobs,databricks-python-sdk,databricks-unity-catalog,mlflow-evaluation,spark-declarative-pipelines,synthetic-data-generation,unstructured-pdf-generation"
+  - name: SKILLS_ONLY_MODE
+    value: "false"
+
+  # Shared Lakebase database (same for all backend instances)
+  - name: LAKEBASE_INSTANCE_NAME
+    value: "builder-app-db"
+  - name: LAKEBASE_DATABASE_NAME
+    value: "databricks_postgres"
+
+  # LLM configuration
+  - name: LLM_PROVIDER
+    value: "DATABRICKS"
+  - name: DATABRICKS_MODEL
+    value: "databricks-meta-llama-3-3-70b-instruct"
+  - name: DATABRICKS_MODEL_MINI
+    value: "databricks-gemini-3-flash"
+  - name: CLAUDE_CODE_STREAM_CLOSE_TIMEOUT
+    value: "3600000"
+  - name: DATABRICKS_CLAUDE_MODEL
+    value: "databricks-claude-sonnet-4-5"
+  - name: CLAUDE_API_TOKEN
+    valueFrom: claude-pat
+
+  # Permission grants
+  - name: AUTO_GRANT_PERMISSIONS_TO
+    value: "account users"
+
+  # Backend-only mode: disable static file serving
+  # (frontend is served from a separate app)
+  - name: SERVE_STATIC_FILES
+    value: "false"

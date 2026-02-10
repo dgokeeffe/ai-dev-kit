@@ -37,6 +37,7 @@ from .routers import (  # noqa: E402
   deploy_router,
   files_router,
   git_router,
+  health_router,
   preview_router,
   projects_router,
   pty_router,
@@ -198,6 +199,7 @@ app.include_router(deploy_router, prefix=API_PREFIX, tags=['deploy'])
 app.include_router(terminal_router, prefix=API_PREFIX, tags=['terminal'])
 app.include_router(pty_router, prefix=API_PREFIX, tags=['pty'])
 app.include_router(preview_router, prefix=API_PREFIX, tags=['preview'])
+app.include_router(health_router, prefix=API_PREFIX, tags=['health'])
 
 # Production: Serve Vite static build with SPA fallback
 # Check both paths: 'client/out' (local dev) and 'client' (deployed via deploy.sh)

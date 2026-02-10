@@ -13,6 +13,64 @@ import type {
 
 const API_BASE = '/api';
 
+// =============================================================================
+// Backend Routing (for dual-app architecture)
+// =============================================================================
+
+/**
+ * Backend URLs for dual-app deployment.
+ * In single-app mode, both point to the same backend (/api).
+ * In dual-app mode, these are set via environment variables to point to
+ * separate backend instances for load distribution.
+ */
+const BACKEND_URLS = [
+  import.meta.env.VITE_BACKEND_1_URL || '/api',
+  import.meta.env.VITE_BACKEND_2_URL || '/api',
+];
+
+/**
+ * Get the backend URL for a given user email using hash-based routing.
+ *
+ * Uses consistent hashing to ensure the same user always routes to the same
+ * backend, which is important for PTY session affinity (sessions are local
+ * to each backend instance).
+ *
+ * The assignment is cached in localStorage to maintain session affinity
+ * even if the routing algorithm changes or backends are reconfigured.
+ */
+export function getBackendUrl(userEmail: string): string {
+  // Check localStorage for existing assignment (session affinity)
+  const cached = localStorage.getItem('backend_assignment');
+  if (cached) {
+    try {
+      const { email, url } = JSON.parse(cached);
+      // Verify the cached URL is still valid (in our configured backends)
+      if (email === userEmail && BACKEND_URLS.includes(url)) {
+        return url;
+      }
+    } catch {
+      // Invalid cache, continue to hash-based routing
+    }
+  }
+
+  // Hash-based routing: sum of character codes mod number of backends
+  const hash = userEmail.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const backendIndex = hash % BACKEND_URLS.length;
+  const url = BACKEND_URLS[backendIndex];
+
+  // Cache assignment for session affinity
+  localStorage.setItem('backend_assignment', JSON.stringify({ email: userEmail, url }));
+  return url;
+}
+
+/**
+ * Clear the cached backend assignment.
+ * Call this when the user logs out or needs to be rerouted.
+ */
+export function clearBackendAssignment(): void {
+  localStorage.removeItem('backend_assignment');
+}
+
 /**
  * Helper to handle API responses.
  * Gracefully handles both JSON and non-JSON error responses (e.g. HTML tracebacks).
@@ -615,4 +673,158 @@ export async function executeTerminalCommand(
     body: JSON.stringify({ command }),
   });
   return handleResponse<TerminalOutput>(response);
+}
+
+// =============================================================================
+// PTY API (with backend routing for dual-app deployment)
+// =============================================================================
+
+export interface PtySession {
+  session_id: string;
+  status: string;
+}
+
+export interface PtyOutput {
+  output: string;
+  exited?: boolean;
+  files_modified_at?: number;
+}
+
+/**
+ * Get the PTY backend URL for the current user.
+ *
+ * This is used by the ClaudeTerminal component to route PTY requests to the
+ * correct backend instance based on the user's email hash.
+ *
+ * @param userEmail - The current user's email (used for hash-based routing)
+ * @returns The base URL for PTY API calls
+ */
+export function getPtyBackendUrl(userEmail: string): string {
+  return getBackendUrl(userEmail);
+}
+
+/**
+ * Create a new PTY session.
+ * Routes to the appropriate backend based on user email hash.
+ */
+export async function createPtySession(
+  projectId: string,
+  userEmail: string
+): Promise<PtySession> {
+  const backendUrl = getBackendUrl(userEmail);
+  const response = await fetch(`${backendUrl}/projects/${projectId}/pty/create`, {
+    method: 'POST',
+  });
+  return handleResponse<PtySession>(response);
+}
+
+/**
+ * Poll PTY output.
+ * Routes to the appropriate backend based on user email hash.
+ */
+export async function pollPtyOutput(
+  projectId: string,
+  sessionId: string,
+  userEmail: string,
+  timeout: number = 0
+): Promise<PtyOutput> {
+  const backendUrl = getBackendUrl(userEmail);
+  const response = await fetch(
+    `${backendUrl}/projects/${projectId}/pty/${sessionId}/output?timeout=${timeout}`,
+    { method: 'POST' }
+  );
+  return handleResponse<PtyOutput>(response);
+}
+
+/**
+ * Send input to PTY.
+ * Routes to the appropriate backend based on user email hash.
+ */
+export async function sendPtyInput(
+  projectId: string,
+  sessionId: string,
+  userEmail: string,
+  data: string
+): Promise<void> {
+  const backendUrl = getBackendUrl(userEmail);
+  const response = await fetch(
+    `${backendUrl}/projects/${projectId}/pty/${sessionId}/input`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data }),
+    }
+  );
+  await handleResponse(response);
+}
+
+/**
+ * Resize PTY terminal.
+ * Routes to the appropriate backend based on user email hash.
+ */
+export async function resizePty(
+  projectId: string,
+  sessionId: string,
+  userEmail: string,
+  cols: number,
+  rows: number
+): Promise<void> {
+  const backendUrl = getBackendUrl(userEmail);
+  const response = await fetch(
+    `${backendUrl}/projects/${projectId}/pty/${sessionId}/resize`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cols, rows }),
+    }
+  );
+  await handleResponse(response);
+}
+
+/**
+ * Delete PTY session.
+ * Routes to the appropriate backend based on user email hash.
+ */
+export async function deletePtySession(
+  projectId: string,
+  sessionId: string,
+  userEmail: string
+): Promise<void> {
+  const backendUrl = getBackendUrl(userEmail);
+  const response = await fetch(
+    `${backendUrl}/projects/${projectId}/pty/${sessionId}`,
+    { method: 'DELETE' }
+  );
+  await handleResponse(response);
+}
+
+/**
+ * Terminate PTY session (via sendBeacon for page unload).
+ * Returns the URL to use with navigator.sendBeacon().
+ */
+export function getPtyTerminateUrl(
+  projectId: string,
+  sessionId: string,
+  userEmail: string
+): string {
+  const backendUrl = getBackendUrl(userEmail);
+  return `${backendUrl}/projects/${projectId}/pty/${sessionId}/terminate`;
+}
+
+// =============================================================================
+// Health API
+// =============================================================================
+
+export interface HealthStatus {
+  status: string;
+  app_instance: string;
+  active_pty_sessions: number;
+}
+
+/**
+ * Check health of a specific backend instance.
+ */
+export async function checkBackendHealth(backendUrl: string): Promise<HealthStatus> {
+  const response = await fetch(`${backendUrl}/health`);
+  return handleResponse<HealthStatus>(response);
 }

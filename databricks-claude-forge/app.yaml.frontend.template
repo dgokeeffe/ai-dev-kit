@@ -1,0 +1,25 @@
+# Frontend-only app configuration for dual-app deployment
+# Serves static React files and routes API calls to backend instances
+# The frontend handles hash-based routing to determine which backend to use
+
+command:
+  - "python"
+  - "-m"
+  - "http.server"
+  - "$DATABRICKS_APP_PORT"
+  - "--directory"
+  - "client/out"
+
+env:
+  # Backend URLs for hash-based routing
+  # Frontend JavaScript reads these to determine which backend to call
+  - name: VITE_BACKEND_1_URL
+    value: "${BACKEND_1_URL}"
+  - name: VITE_BACKEND_2_URL
+    value: "${BACKEND_2_URL}"
+
+  # App identification
+  - name: APP_INSTANCE
+    value: "frontend"
+  - name: ENV
+    value: "production"

@@ -7,6 +7,7 @@ from .conversations import router as conversations_router
 from .deploy import router as deploy_router
 from .files import router as files_router
 from .git import router as git_router
+from .health import router as health_router
 from .preview import router as preview_router
 from .projects import router as projects_router
 from .pty import router as pty_router
@@ -22,6 +23,7 @@ __all__ = [
   'deploy_router',
   'files_router',
   'git_router',
+  'health_router',
   'preview_router',
   'projects_router',
   'pty_router',
