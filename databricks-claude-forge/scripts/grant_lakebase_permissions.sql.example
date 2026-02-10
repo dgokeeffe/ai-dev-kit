@@ -1,0 +1,23 @@
+-- Grant Lakebase table permissions to the app's service principal
+--
+-- Run this SQL as a user that owns the tables (e.g. the user who ran migrations)
+-- or has GRANT rights. Options:
+--   1. Databricks Lakebase SQL editor (Workspace > Lakebase > your instance > SQL)
+--   2. Any PostgreSQL client connected to the Lakebase instance
+--
+-- Replace YOUR_SERVICE_PRINCIPAL_CLIENT_ID with your app's service principal client ID:
+--   databricks apps get databricks-builder-app -o json | jq -r .service_principal_client_id
+-- Example: 1e02dfbd-e494-4329-8eb4-2c85373754f5
+
+-- Grant privileges on existing tables
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO "YOUR_SERVICE_PRINCIPAL_CLIENT_ID";
+
+-- Grant privileges on sequences (for auto-increment columns)
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO "YOUR_SERVICE_PRINCIPAL_CLIENT_ID";
+
+-- Schema usage and create
+GRANT USAGE, CREATE ON SCHEMA public TO "YOUR_SERVICE_PRINCIPAL_CLIENT_ID";
+
+-- Default privileges for future tables created by anyone
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "YOUR_SERVICE_PRINCIPAL_CLIENT_ID";
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "YOUR_SERVICE_PRINCIPAL_CLIENT_ID";

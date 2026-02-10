@@ -1,0 +1,12 @@
+{
+  "name": "databricks-builder-app-claude",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Claude Code CLI for Databricks Builder App",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^1.0.0"
+  },
+  "scripts": {
+    "build": "echo 'Frontend pre-built by deploy script (see client/out/)'"
+  }
+}

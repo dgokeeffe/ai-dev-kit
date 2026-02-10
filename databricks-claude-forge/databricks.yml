@@ -1,0 +1,159 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  Databricks Asset Bundle - Production Deployment Method                  ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+#
+# This is the RECOMMENDED deployment method for production environments.
+# It provides:
+#   - Infrastructure-as-code for all resources
+#   - Multi-environment support (dev, staging, prod)
+#   - Atomic deployments with rollback capability
+#   - Automatic resource provisioning (Lakebase, App, Permissions)
+#
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  Quick Start                                                              ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+#
+# 1. Prep build (build frontend, copy packages):
+#    ./scripts/deploy.sh --prep-only
+#
+# 2. Deploy to development:
+#    databricks bundle deploy -t dev
+#
+# 3. Grant Lakebase permissions:
+#    ./scripts/grant_lakebase_permissions.sh databricks-claude-forge
+#
+# For detailed guide, see: docs/DEPLOYMENT.md
+#
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  What This Bundle Provisions                                             ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+#
+# - Lakebase PostgreSQL instance (CU_1 tier)
+# - Unity Catalog database for app data
+# - Databricks App with Lakebase resource linked
+# - Service principal with appropriate permissions
+#
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  Working with Existing Lakebase Instances                                ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+#
+# Use existing instance (prevents Terraform from recreating it):
+#   databricks bundle deploy -t dev --var="lakebase_instance_name=your-instance"
+#
+# Deploy app only (don't touch DB) - use "existing" target:
+#   # First time - bind existing instance:
+#   databricks bundle deployment bind builder_db builder-app-db -t existing --auto-approve
+#   databricks bundle deploy -t existing --var="lakebase_instance_name=builder-app-db"
+#
+#   # Later deploys (DB already bound):
+#   databricks bundle deploy -t existing --var="lakebase_instance_name=builder-app-db"
+#
+# After any deploy, grant table permissions:
+#   ./scripts/grant_lakebase_permissions.sh <app-name> <instance-name>
+
+bundle:
+  name: databricks-builder-app
+
+# Include sibling packages and skills in the bundle
+sync:
+  include:
+    - "server/**"
+    - "client/out/**"
+    - "skills/**"
+    - "alembic/**"
+    - "alembic.ini"
+    - "requirements.txt"
+    - "package.json"
+    - "app.yaml"
+    - "packages/**"
+  exclude:
+    - "**/__pycache__"
+    - "**/*.pyc"
+    - "**/.env*"
+    - "**/node_modules"
+    - ".venv/**"
+    - "**/tests/**"
+    - "client/src/**"
+    - "**/*.egg-info"
+
+# Pre-deploy: Build frontend and copy packages
+# Run: databricks bundle deploy -t <target>
+# The deploy.sh script handles this more comprehensively
+
+resources:
+  # Lakebase database instance for persistence
+  database_instances:
+    builder_db:
+      name: ${var.lakebase_instance_name}
+      capacity: CU_1  # Smallest size - scale up as needed
+      # Uncomment to stop instance when not in use (saves cost)
+      # stopped: true
+
+  # Database catalog not in bundle: Databricks provider returns "Update Database
+  # Catalog is not yet implemented" on any catalog change. Create the UC catalog
+  # for Lakebase manually once if needed (Lakebase UI or SQL).
+
+  # Databricks App
+  apps:
+    builder_app:
+      name: ${var.app_name}
+      description: "Claude Code agent interface with integrated Databricks tools"
+      source_code_path: .
+      # App resources
+      resources:
+        # Lakebase database for persistence
+        - name: lakebase
+          database:
+            instance_name: ${resources.database_instances.builder_db.name}
+            database_name: databricks_postgres
+            permission: CAN_CONNECT_AND_CREATE
+        # Foundation Model endpoints for Claude Code
+        - name: claude-sonnet-45
+          serving_endpoint:
+            name: databricks-claude-sonnet-4-5
+            permission: CAN_QUERY
+        - name: claude-opus-46
+          serving_endpoint:
+            name: databricks-claude-opus-4-6
+            permission: CAN_QUERY
+
+variables:
+  app_name:
+    description: "Name of the Databricks App"
+    default: "databricks-builder-app"
+  personal_app_name:
+    description: "Custom app name for personal deployments"
+    default: "builder-app-dev"
+  lakebase_instance_name:
+    description: "Name of the Lakebase database instance"
+    default: "builder-app-db"
+  lakebase_catalog_name:
+    description: "Name of the Unity Catalog catalog for Lakebase"
+    default: "builder_app_catalog"
+
+targets:
+  # Development target - provisions new Lakebase instance
+  # Uses workspace from: databricks auth login or DATABRICKS_HOST env var
+  dev:
+    mode: development
+    default: true
+
+  # Use existing Lakebase instance – deploy app only, don't recreate/change DB.
+  # First time: bind the DB, then deploy:
+  #   databricks bundle deployment bind builder_db builder-app-db -t existing --auto-approve
+  #   databricks bundle deploy -t existing -var="lakebase_instance_name=builder-app-db"
+  existing:
+    mode: development
+
+  # Production target
+  prod:
+    mode: production
+    variables:
+      app_name: databricks-builder-app-prod
+      lakebase_instance_name: builder-app-db-prod
+
+  # Personal deployments with custom naming
+  personal:
+    mode: development
+    variables:
+      app_name: ${var.personal_app_name}
