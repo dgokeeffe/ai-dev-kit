@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # gates.sh - Verification gates for Ralph Loop
-# Generated: 2026-02-06T21:12:48Z
-# Gates: Lint
-#
-# Regenerate with: discover-gates.sh --force
+# Generated: 2026-02-10
+# Gates: Lint Types Build
 
 set -uo pipefail
 
@@ -25,7 +23,9 @@ run_gate() {
     fi
 }
 
-run_gate "Lint" "ruff check ."
+run_gate "Lint" "uvx ruff check ."
+run_gate "Types" "cd client && npx tsc --noEmit"
+run_gate "Build" "npm run build"
 
 echo ""
 if [[ $FAILED -eq 0 ]]; then

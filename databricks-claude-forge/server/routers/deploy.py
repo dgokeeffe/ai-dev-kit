@@ -16,13 +16,13 @@ from typing import AsyncIterator, Optional
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from ..db import get_session
 from ..db.models import DeploymentHistory
 from ..services.backup_manager import ensure_project_directory
 from ..services.storage import ProjectStorage
 from ..services.user import get_current_user, get_user_credentials
-from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -360,8 +360,6 @@ async def get_deployment_history(request: Request, project_id: str):
   """
   await _verify_project_access(request, project_id)
 
-  from ..db import get_session
-  from ..db.models import DeploymentHistory
   from sqlalchemy import select
 
   async with get_session() as session:
@@ -424,8 +422,6 @@ async def deploy_project(request: Request, project_id: str, config: DeployConfig
     logger.info(f'Auto-generated app name: {app_name}')
 
   # Create deployment history record
-  from ..db import get_session
-  from ..db.models import DeploymentHistory
 
   deployment_id = None
   async with get_session() as session:

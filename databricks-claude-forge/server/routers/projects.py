@@ -32,8 +32,8 @@ class UpdateProjectRequest(BaseModel):
 @router.get('/projects')
 async def get_all_projects(
   request: Request,
-  limit: int = Query(50, ge=1, le=100, description="Maximum number of projects to return"),
-  offset: int = Query(0, ge=0, description="Number of projects to skip")
+  limit: int = Query(50, ge=1, le=100, description='Maximum number of projects to return'),
+  offset: int = Query(0, ge=0, description='Number of projects to skip')
 ):
   """Get all projects for the current user sorted by created_at (newest first).
 

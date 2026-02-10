@@ -4,15 +4,13 @@ Allows users to start/stop preview servers for their projects and proxy
 requests to them for local development testing.
 """
 
-import asyncio
 import logging
 import subprocess
 from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response, StreamingResponse
-
+from fastapi.responses import Response
 from server.services.backup_manager import PROJECTS_BASE_DIR
 
 logger = logging.getLogger(__name__)
