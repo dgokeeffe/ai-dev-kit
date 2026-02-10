@@ -580,6 +580,7 @@ export default function ProjectPage() {
       isMaximized={isClaudeMaximized}
       onToggleMaximize={() => setIsClaudeMaximized((prev) => !prev)}
       suggestedPrompts={suggestedPrompts}
+      onFilesChanged={handleRefreshFiles}
     />
   ) : null;
 
