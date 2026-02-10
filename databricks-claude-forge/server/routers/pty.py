@@ -469,6 +469,32 @@ def _get_session(project_id: str, session_id: str) -> PtySession:
   return session
 
 
+def _get_latest_mtime(project_dir: str) -> float:
+  """Get the most recent modification time of any file in project_dir.
+
+  Used to detect when Claude creates or modifies files so the frontend
+  can auto-refresh the file tree.
+  """
+  latest = 0.0
+  try:
+    for root, dirs, files in os.walk(project_dir):
+      # Skip hidden directories
+      dirs[:] = [d for d in dirs if not d.startswith('.')]
+      for f in files:
+        if f.startswith('.'):
+          continue
+        path = os.path.join(root, f)
+        try:
+          mtime = os.path.getmtime(path)
+          if mtime > latest:
+            latest = mtime
+        except OSError:
+          pass
+  except Exception:
+    pass
+  return latest
+
+
 @router.post('/projects/{project_id}/pty/{session_id}/output')
 async def poll_output(project_id: str, session_id: str):
   """Drain buffered PTY output (base64-encoded).
@@ -493,6 +519,11 @@ async def poll_output(project_id: str, session_id: str):
   result: dict = {'output': encoded}
   if not session.alive:
     result['exited'] = True
+
+  # Add file modification timestamp for auto-refresh
+  project_dir = ensure_project_directory(session.project_id)
+  result['files_modified_at'] = _get_latest_mtime(str(project_dir))
+
   return result
 
 

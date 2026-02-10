@@ -14,11 +14,12 @@ interface ClaudeTerminalProps {
   onToggleMaximize?: () => void;
   suggestedPrompts?: string[];
   className?: string;
+  onFilesChanged?: () => void;
 }
 
 type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
 
-export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximize, suggestedPrompts, className = '' }: ClaudeTerminalProps) {
+export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximize, suggestedPrompts, className = '', onFilesChanged }: ClaudeTerminalProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -32,6 +33,7 @@ export function ClaudeTerminal({ projectId, isMaximized = false, onToggleMaximiz
   const isConnectingRef = useRef(false);
   const isReconnectingRef = useRef(false);
   const reconnectFnRef = useRef<(() => void) | null>(null);
+  const lastMtimeRef = useRef<number>(0);
 
   const stopPolling = useCallback(() => {
     if (pollingRef.current) {
