@@ -35,7 +35,7 @@ env:
 
   # Shared Lakebase database (same for all backend instances)
   - name: LAKEBASE_INSTANCE_NAME
-    value: "builder-app-db"
+    value: "daveok"
   - name: LAKEBASE_DATABASE_NAME
     value: "databricks_postgres"
 

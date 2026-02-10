@@ -63,7 +63,7 @@ echo ""
 echo "=== Deploying Backend 1 (from git) ==="
 databricks apps deploy "${APP_PREFIX}-backend-1" \
     --source-code-path "${WORKSPACE_REPO_PATH}" \
-    --mode AUTO_SYNC
+    --mode SNAPSHOT
 
 BACKEND_1_URL="https://${APP_PREFIX}-backend-1.${WORKSPACE_DOMAIN}"
 echo "Backend 1 URL: ${BACKEND_1_URL}"
@@ -73,7 +73,7 @@ echo ""
 echo "=== Deploying Backend 2 (from git) ==="
 databricks apps deploy "${APP_PREFIX}-backend-2" \
     --source-code-path "${WORKSPACE_REPO_PATH}" \
-    --mode AUTO_SYNC
+    --mode SNAPSHOT
 
 BACKEND_2_URL="https://${APP_PREFIX}-backend-2.${WORKSPACE_DOMAIN}"
 echo "Backend 2 URL: ${BACKEND_2_URL}"
@@ -83,7 +83,7 @@ echo ""
 echo "=== Deploying Frontend (from git) ==="
 databricks apps deploy "${APP_PREFIX}" \
     --source-code-path "${WORKSPACE_REPO_PATH}" \
-    --mode AUTO_SYNC
+    --mode SNAPSHOT
 
 FRONTEND_URL="https://${APP_PREFIX}.${WORKSPACE_DOMAIN}"
 echo "Frontend URL: ${FRONTEND_URL}"
@@ -100,11 +100,11 @@ echo "Health endpoints:"
 echo "  curl ${BACKEND_1_URL}/api/health"
 echo "  curl ${BACKEND_2_URL}/api/health"
 echo ""
-echo "Note: Using AUTO_SYNC mode - apps will automatically update when git repo changes."
+echo "Note: Using SNAPSHOT mode - re-run this script to deploy new code versions."
 echo "      Users are automatically routed to backends based on email hash."
 echo "      PTY sessions are local to each backend instance."
 echo ""
 echo "To update apps after git push:"
 echo "  1. Push changes to git"
 echo "  2. Sync Databricks Repo: databricks repos update ${WORKSPACE_REPO_PATH} --branch main"
-echo "  3. Apps will auto-sync from the repo"
+echo "  3. Re-run this script to deploy the updated code"
