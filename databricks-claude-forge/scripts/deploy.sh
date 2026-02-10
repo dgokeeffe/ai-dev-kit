@@ -1,6 +1,8 @@
 #!/bin/bash
 # Deploy script for Databricks Builder App
-# Deploys the app to Databricks Apps platform
+# Supports two deployment modes:
+#   --git   Deploy from Git repository (recommended)
+#   legacy  Upload files to workspace (fallback)
 
 set -e
 
@@ -22,6 +24,9 @@ WORKSPACE_PATH=""
 STAGING_DIR=""
 SKIP_BUILD="${SKIP_BUILD:-false}"
 PREP_ONLY="${PREP_ONLY:-false}"
+GIT_DEPLOY="${GIT_DEPLOY:-false}"
+GIT_BRANCH=""
+GIT_COMMIT=""
 
 # Usage information
 usage() {
@@ -30,24 +35,24 @@ usage() {
   echo "Deploy the Databricks Builder App to Databricks Apps platform."
   echo ""
   echo "Arguments:"
-  echo "  app-name              Name of the Databricks App (required unless --prep-only)"
+  echo "  app-name              Name of the Databricks App"
+  echo ""
+  echo "Deployment Modes:"
+  echo "  --git                 Deploy from Git repository (recommended)"
+  echo "  --branch BRANCH       Git branch to deploy (default: current branch)"
+  echo "  --commit SHA          Deploy a specific Git commit"
+  echo "  --prep-only           Legacy: build frontend + copy packages for DAB deploy"
   echo ""
   echo "Options:"
-  echo "  --prep-only           Only build frontend and copy packages/skills (for DAB deploy)"
   echo "  --skip-build          Skip frontend build (use existing build)"
-  echo "  --staging-dir DIR     Custom staging directory (default: /tmp/<app-name>-deploy)"
+  echo "  --staging-dir DIR     Custom staging directory (legacy mode)"
   echo "  -h, --help            Show this help message"
   echo ""
-  echo "Prerequisites:"
-  echo "  1. Databricks CLI configured (databricks auth login)"
-  echo "  2. App created in Databricks (databricks apps create <app-name>)"
-  echo "  3. Lakebase added as app resource (for database)"
-  echo "  4. app.yaml configured with your settings"
-  echo ""
-  echo "Example:"
-  echo "  $0 my-builder-app"
-  echo "  $0 --prep-only   # Prepare for: databricks bundle deploy -t dev"
-  echo "  $0 my-builder-app --skip-build"
+  echo "Examples:"
+  echo "  $0 --git my-builder-app              # Deploy current branch from Git"
+  echo "  $0 --git my-builder-app --branch dev # Deploy 'dev' branch from Git"
+  echo "  $0 --prep-only                       # Legacy: prep for databricks bundle deploy"
+  echo "  $0 my-builder-app                    # Legacy: upload files to workspace"
 }
 
 # Parse arguments
@@ -56,6 +61,18 @@ while [[ $# -gt 0 ]]; do
     -h|--help)
       usage
       exit 0
+      ;;
+    --git)
+      GIT_DEPLOY=true
+      shift
+      ;;
+    --branch)
+      GIT_BRANCH="$2"
+      shift 2
+      ;;
+    --commit)
+      GIT_COMMIT="$2"
+      shift 2
       ;;
     --prep-only)
       PREP_ONLY=true
@@ -87,6 +104,134 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# ══════════════════════════════════════════════════════════════════════════
+# Git-based deployment
+# ══════════════════════════════════════════════════════════════════════════
+if [ "$GIT_DEPLOY" = true ]; then
+  if [ -z "$APP_NAME" ]; then
+    echo -e "${RED}Error: App name is required for --git deployment${NC}"
+    echo "  Usage: $0 --git <app-name> [--branch <branch>]"
+    exit 1
+  fi
+
+  echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${BLUE}║       Git-based Deployment                                ║${NC}"
+  echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+
+  # Determine branch or commit
+  if [ -n "$GIT_COMMIT" ]; then
+    GIT_REF_TYPE="commit"
+    GIT_REF="$GIT_COMMIT"
+  else
+    if [ -z "$GIT_BRANCH" ]; then
+      GIT_BRANCH=$(cd "$REPO_ROOT" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    fi
+    GIT_REF_TYPE="branch"
+    GIT_REF="$GIT_BRANCH"
+  fi
+
+  echo -e "  App Name:     ${GREEN}${APP_NAME}${NC}"
+  echo -e "  Git ${GIT_REF_TYPE}:  ${GREEN}${GIT_REF}${NC}"
+  echo -e "  Source Path:  databricks-claude-forge"
+  echo ""
+
+  # Check prerequisites
+  echo -e "${YELLOW}[1/4] Checking prerequisites...${NC}"
+  if ! command -v databricks &> /dev/null; then
+    echo -e "${RED}Error: Databricks CLI not found.${NC}"
+    exit 1
+  fi
+  if ! databricks auth describe &> /dev/null; then
+    echo -e "${RED}Error: Not authenticated. Run: databricks auth login${NC}"
+    exit 1
+  fi
+  echo -e "  ${GREEN}✓${NC} Databricks CLI authenticated"
+
+  # Verify app exists and has git_repository configured
+  echo -e "${YELLOW}[2/4] Verifying app...${NC}"
+  APP_JSON=$(databricks apps get "$APP_NAME" --output json 2>/dev/null || echo "{}")
+  if echo "$APP_JSON" | python3 -c "import sys, json; d=json.load(sys.stdin); assert d.get('name')" 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} App '${APP_NAME}' exists"
+  else
+    echo -e "${RED}Error: App '${APP_NAME}' not found.${NC}"
+    echo "  Create it first with: databricks bundle deploy -t dev"
+    exit 1
+  fi
+
+  # Check if git_repository is set
+  HAS_GIT=$(echo "$APP_JSON" | python3 -c "import sys, json; d=json.load(sys.stdin); print('yes' if d.get('git_repository') else 'no')" 2>/dev/null || echo "no")
+  if [ "$HAS_GIT" != "yes" ]; then
+    echo -e "${YELLOW}  ⚠ App does not have git_repository configured.${NC}"
+    echo -e "  Run 'databricks bundle deploy -t dev' first to set up git integration."
+    exit 1
+  fi
+  echo -e "  ${GREEN}✓${NC} Git repository configured"
+
+  # Check for uncommitted changes
+  echo -e "${YELLOW}[3/4] Checking Git status...${NC}"
+  cd "$REPO_ROOT"
+  if [ -n "$(git status --porcelain -- databricks-claude-forge/ databricks-tools-core/ databricks-mcp-server/ databricks-skills/ 2>/dev/null)" ]; then
+    echo -e "${YELLOW}  ⚠ Uncommitted changes detected in app-related directories.${NC}"
+    echo "  The deployment will use the latest PUSHED commit, not local changes."
+    echo ""
+    read -p "  Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      echo "  Aborted. Commit and push your changes first."
+      exit 1
+    fi
+  fi
+
+  # Check if local branch is ahead of remote
+  LOCAL_SHA=$(git rev-parse HEAD 2>/dev/null)
+  if [ "$GIT_REF_TYPE" = "branch" ]; then
+    REMOTE_SHA=$(git rev-parse "origin/${GIT_BRANCH}" 2>/dev/null || echo "")
+    if [ -n "$REMOTE_SHA" ] && [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+      echo -e "${YELLOW}  ⚠ Local branch is not in sync with origin/${GIT_BRANCH}.${NC}"
+      echo "  Push your changes: git push origin ${GIT_BRANCH}"
+    fi
+  fi
+  echo -e "  ${GREEN}✓${NC} Git status checked"
+  echo ""
+  echo -e "  ${BLUE}Note:${NC} The platform automatically runs 'npm run build' during"
+  echo -e "  deployment, which builds the React frontend. No pre-build needed."
+
+  # Deploy from Git
+  echo -e "${YELLOW}[4/4] Deploying from Git...${NC}"
+  if [ "$GIT_REF_TYPE" = "commit" ]; then
+    DEPLOY_JSON="{\"git_source\": {\"commit\": \"${GIT_REF}\", \"source_code_path\": \"databricks-claude-forge\"}}"
+  else
+    DEPLOY_JSON="{\"git_source\": {\"branch\": \"${GIT_REF}\", \"source_code_path\": \"databricks-claude-forge\"}}"
+  fi
+
+  echo "  Payload: $DEPLOY_JSON"
+  echo ""
+
+  DEPLOY_OUTPUT=$(databricks apps deploy "$APP_NAME" --json "$DEPLOY_JSON" 2>&1)
+  echo "$DEPLOY_OUTPUT"
+
+  # Get app URL
+  APP_URL=$(databricks apps get "$APP_NAME" --output json 2>/dev/null | python3 -c "import sys, json; print(json.load(sys.stdin).get('url', 'N/A'))" 2>/dev/null || echo "N/A")
+
+  echo ""
+  echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}║         Git Deployment Initiated!                          ║${NC}"
+  echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  App URL:  ${GREEN}${APP_URL}${NC}"
+  echo -e "  Branch:   ${GIT_REF}"
+  echo ""
+  echo "  Monitor deployment:"
+  echo "    databricks apps logs ${APP_NAME}"
+  echo ""
+  exit 0
+fi
+
+# ══════════════════════════════════════════════════════════════════════════
+# Legacy: --prep-only (build frontend + copy packages for DABs file deploy)
+# ══════════════════════════════════════════════════════════════════════════
+
 # Validate app name (not required for --prep-only)
 if [ -z "$APP_NAME" ] && [ "$PREP_ONLY" != true ]; then
   echo -e "${RED}Error: App name is required${NC}"
@@ -99,7 +244,7 @@ fi
 STAGING_DIR="${STAGING_DIR:-/tmp/${APP_NAME:-builder-app}-deploy}"
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║       Databricks Builder App Deployment                    ║${NC}"
+echo -e "${BLUE}║       Legacy File-based Deployment                        ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  App Name:     ${GREEN}${APP_NAME}${NC}"
@@ -323,7 +468,6 @@ echo ""
 # Deploy the app
 echo -e "${YELLOW}[6/6] Deploying app...${NC}"
 DEPLOY_OUTPUT=$(databricks apps deploy "$APP_NAME" --source-code-path "$WORKSPACE_PATH" 2>&1)
-databricks bundle run "$APP_NAME" -t dev
 echo "$DEPLOY_OUTPUT"
 
 # Check deployment status

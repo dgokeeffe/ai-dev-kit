@@ -10,17 +10,35 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Source skills directory - check multiple locations
-# 1. Sibling to this app (local development): ../../databricks-skills
-# 2. Deployed location (Databricks Apps): ./skills at app root
-_DEV_SKILLS_DIR = Path(__file__).parent.parent.parent.parent / 'databricks-skills'
-_DEPLOYED_SKILLS_DIR = Path(__file__).parent.parent.parent / 'skills'
+# Source skills directory - check multiple locations in priority order:
+# 1. Pre-copied skills (DABs file-based deployment): ./skills at app root
+# 2. Git deployment (full repo cloned): ../databricks-skills relative to app root
+# 3. Local development: ../../databricks-skills relative to repo root
+_APP_ROOT = Path(__file__).parent.parent.parent
+_DEPLOYED_SKILLS_DIR = _APP_ROOT / 'skills'
+_GIT_SKILLS_DIR = _APP_ROOT.parent / 'databricks-skills'
+_DEV_SKILLS_DIR = _APP_ROOT.parent / 'databricks-skills'
 
-# Use deployed location if it exists (skills are pre-copied), otherwise use dev location
-if _DEPLOYED_SKILLS_DIR.exists() and any(_DEPLOYED_SKILLS_DIR.iterdir()):
-  SKILLS_SOURCE_DIR = _DEPLOYED_SKILLS_DIR
-else:
-  SKILLS_SOURCE_DIR = _DEV_SKILLS_DIR
+
+def _resolve_skills_source() -> Path:
+  """Determine the skills source directory based on deployment context."""
+  # 1. Pre-copied skills (DABs file-based or manual copy)
+  if _DEPLOYED_SKILLS_DIR.exists() and any(_DEPLOYED_SKILLS_DIR.iterdir()):
+    logger.info(f'Using pre-copied skills from: {_DEPLOYED_SKILLS_DIR}')
+    return _DEPLOYED_SKILLS_DIR
+  # 2. Git deployment — sibling directory in the monorepo
+  if _GIT_SKILLS_DIR.exists() and (_GIT_SKILLS_DIR / 'README.md').exists():
+    logger.info(f'Using git repo skills from: {_GIT_SKILLS_DIR}')
+    return _GIT_SKILLS_DIR
+  # 3. Local development fallback
+  if _DEV_SKILLS_DIR.exists():
+    logger.info(f'Using dev skills from: {_DEV_SKILLS_DIR}')
+    return _DEV_SKILLS_DIR
+  # Fallback to the deployed dir (even if empty — startup will log a warning)
+  return _DEPLOYED_SKILLS_DIR
+
+
+SKILLS_SOURCE_DIR = _resolve_skills_source()
 
 # Local cache of skills within this app (copied on startup)
 APP_SKILLS_DIR = Path(__file__).parent.parent.parent / 'skills'

@@ -4,7 +4,7 @@ skills/
 # Projects directory (local development)
 projects/
 
-# Packages (copied from sibling dirs during deployment)
+# Packages (copied from sibling dirs during legacy deployment)
 packages/
 
 # Conda environment (for Databricks Apps deployment)
@@ -16,13 +16,14 @@ __pycache__/
 *.egg-info/
 .venv/
 
-# Environment
+# Environment (app.yaml is tracked for git-based deployment)
 .env.local
-app.yaml
 
 # Node (client + server-node)
 client/node_modules/
 server-node/node_modules/
+# client/out/ is NOT tracked — the platform runs `npm run build` automatically
+# during deployment (see package.json build script and deployment logic docs).
 client/out/
 client/dist/
 client/.vite/

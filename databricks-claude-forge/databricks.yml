@@ -1,26 +1,35 @@
 # ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  Databricks Asset Bundle - Production Deployment Method                  ║
+# ║  Databricks Asset Bundle - Git Integration Deployment                    ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 #
-# This is the RECOMMENDED deployment method for production environments.
-# It provides:
-#   - Infrastructure-as-code for all resources
-#   - Multi-environment support (dev, staging, prod)
-#   - Atomic deployments with rollback capability
-#   - Automatic resource provisioning (Lakebase, App, Permissions)
+# This bundle provisions infrastructure AND deploys the app directly from
+# the Git repository — no more manual file uploads or --prep-only steps.
 #
 # ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  Quick Start                                                              ║
+# ║  Quick Start (Git-based)                                                 ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
 #
-# 1. Prep build (build frontend, copy packages):
-#    ./scripts/deploy.sh --prep-only
+# 1. Commit and push your changes:
+#    git add . && git commit -m "Update app" && git push
 #
-# 2. Deploy to development:
+# 2. Deploy infrastructure + create app with git repo link:
 #    databricks bundle deploy -t dev
 #
-# 3. Grant Lakebase permissions:
-#    ./scripts/grant_lakebase_permissions.sh databricks-claude-forge
+# 3. Deploy the app from Git:
+#    ./scripts/deploy.sh --git <app-name>
+#    # or manually:
+#    databricks apps deploy <app-name> --json '{
+#      "git_source": {
+#        "branch": "main",
+#        "source_code_path": "databricks-claude-forge"
+#      }
+#    }'
+#
+# 4. Grant Lakebase permissions:
+#    ./scripts/grant_lakebase_permissions.sh <app-name>
+#
+# Note: The platform automatically runs `npm run build` during deployment,
+# which builds the React frontend. No need to pre-build or commit client/out/.
 #
 # For detailed guide, see: docs/DEPLOYMENT.md
 #
@@ -29,8 +38,7 @@
 # ╚══════════════════════════════════════════════════════════════════════════╝
 #
 # - Lakebase PostgreSQL instance (CU_1 tier)
-# - Unity Catalog database for app data
-# - Databricks App with Lakebase resource linked
+# - Databricks App with Git repository linked (source from GitHub)
 # - Service principal with appropriate permissions
 #
 # ╔══════════════════════════════════════════════════════════════════════════╗
@@ -54,18 +62,18 @@
 bundle:
   name: databricks-builder-app
 
-# Include sibling packages and skills in the bundle
+# Sync section kept minimal — with git integration, app source code
+# comes from the Git repo, not from local file uploads.
+# Only needed if falling back to DABs file-based deployment.
 sync:
   include:
     - "server/**"
     - "client/out/**"
-    - "skills/**"
     - "alembic/**"
     - "alembic.ini"
     - "requirements.txt"
     - "package.json"
     - "app.yaml"
-    - "packages/**"
   exclude:
     - "**/__pycache__"
     - "**/*.pyc"
@@ -75,10 +83,6 @@ sync:
     - "**/tests/**"
     - "client/src/**"
     - "**/*.egg-info"
-
-# Pre-deploy: Build frontend and copy packages
-# Run: databricks bundle deploy -t <target>
-# The deploy.sh script handles this more comprehensively
 
 resources:
   # Lakebase database instance for persistence
@@ -93,12 +97,19 @@ resources:
   # Catalog is not yet implemented" on any catalog change. Create the UC catalog
   # for Lakebase manually once if needed (Lakebase UI or SQL).
 
-  # Databricks App
+  # Databricks App — with Git repository integration
   apps:
     builder_app:
       name: ${var.app_name}
       description: "Claude Code agent interface with integrated Databricks tools"
+      # source_code_path is required by the bundle schema but is superseded
+      # by git_repository when deploying via git_source.
       source_code_path: .
+      # Git integration: app source is pulled from this repo on each deploy.
+      # Deployments reference a branch/tag/commit + subdirectory via git_source.
+      git_repository:
+        provider: "gitHub"
+        url: ${var.git_repo_url}
       # App resources
       resources:
         # Lakebase database for persistence
@@ -130,6 +141,12 @@ variables:
   lakebase_catalog_name:
     description: "Name of the Unity Catalog catalog for Lakebase"
     default: "builder_app_catalog"
+  git_repo_url:
+    description: "Git repository URL for the app source code"
+    default: "https://github.com/databricks-solutions/ai-dev-kit"
+  git_branch:
+    description: "Git branch to deploy from"
+    default: "main"
 
 targets:
   # Development target - provisions new Lakebase instance

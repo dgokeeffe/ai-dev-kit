@@ -23,7 +23,11 @@ anthropic>=0.42.0
 mcp>=1.0.0
 fastmcp>=0.1.0
 
-# Dependencies for databricks-tools-core
+# Sibling packages from the monorepo (installed via git subdirectory)
+databricks-tools-core @ git+https://github.com/dgokeeffe/ai-dev-kit.git@main#subdirectory=databricks-tools-core
+databricks-mcp-server @ git+https://github.com/dgokeeffe/ai-dev-kit.git@main#subdirectory=databricks-mcp-server
+
+# Transitive dependencies for databricks-tools-core
 requests>=2.31.0
 sqlglot>=20.0.0
 sqlfluff>=3.0.0

@@ -13,7 +13,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
-from server.services.storage import PROJECTS_BASE_DIR
+from server.services.backup_manager import PROJECTS_BASE_DIR
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

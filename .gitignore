@@ -19,8 +19,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Python build artifacts (use top-level only to avoid matching src/lib/)
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -54,6 +55,7 @@ Thumbs.db
 
 # Configuration files with sensitive data
 *conf*.json
+!**/tsconfig*.json
 *.secret
 credentials.json
 
