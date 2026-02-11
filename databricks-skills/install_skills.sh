@@ -42,7 +42,7 @@ MLFLOW_REPO_RAW_URL="https://raw.githubusercontent.com/mlflow/skills"
 MLFLOW_REPO_REF="main"
 
 # Databricks skills (hosted in this repo)
-DATABRICKS_SKILLS="agent-bricks aibi-dashboards asset-bundles databricks-app-apx databricks-app-python databricks-config databricks-docs databricks-genie databricks-jobs databricks-python-sdk databricks-unity-catalog lakebase-provisioned model-serving spark-declarative-pipelines synthetic-data-generation unstructured-pdf-generation"
+DATABRICKS_SKILLS="agent-bricks aibi-dashboards asset-bundles databricks-app-apx databricks-app-python databricks-config databricks-docs databricks-genie databricks-jobs databricks-python-sdk databricks-unity-catalog lakebase-provisioned mlflow-evaluation model-serving spark-declarative-pipelines spark-structured-streaming synthetic-data-generation unstructured-pdf-generation vector-search"
 
 # MLflow skills (fetched from mlflow/skills repo)
 MLFLOW_SKILLS="agent-evaluation analyze-mlflow-chat-session analyze-mlflow-trace instrumenting-with-mlflow-tracing mlflow-onboarding querying-mlflow-metrics retrieving-mlflow-traces searching-mlflow-docs"
@@ -68,8 +68,10 @@ get_skill_description() {
         "lakebase-provisioned") echo "Lakebase Provisioned - data connections and reverse ETL" ;;
         "model-serving") echo "Model Serving - deploy MLflow models and AI agents" ;;
         "spark-declarative-pipelines") echo "Spark Declarative Pipelines (SDP/LDP/DLT)" ;;
+        "spark-structured-streaming") echo "Spark Structured Streaming - real-time data processing" ;;
         "synthetic-data-generation") echo "Synthetic test data generation" ;;
         "unstructured-pdf-generation") echo "Generate synthetic PDFs for RAG" ;;
+        "vector-search") echo "Vector Search - endpoints, indexes, and queries for RAG" ;;
         # MLflow skills (from mlflow/skills repo)
         "agent-evaluation") echo "End-to-end agent evaluation workflow" ;;
         "analyze-mlflow-chat-session") echo "Debug multi-turn conversations" ;;
@@ -95,8 +97,12 @@ get_skill_extra_files() {
         "databricks-jobs") echo "task-types.md triggers-schedules.md notifications-monitoring.md examples.md" ;;
         "databricks-python-sdk") echo "doc-index.md examples/1-authentication.py examples/2-clusters-and-jobs.py examples/3-sql-and-warehouses.py examples/4-unity-catalog.py examples/5-serving-and-vector-search.py" ;;
         "databricks-unity-catalog") echo "5-system-tables.md" ;;
+        "lakebase-provisioned") echo "connection-patterns.md reverse-etl.md" ;;
+        "mlflow-evaluation") echo "references/CRITICAL-interfaces.md references/GOTCHAS.md references/patterns-context-optimization.md references/patterns-datasets.md references/patterns-evaluation.md references/patterns-scorers.md references/patterns-trace-analysis.md references/user-journeys.md" ;;
         "model-serving") echo "1-classical-ml.md 2-custom-pyfunc.md 3-genai-agents.md 4-tools-integration.md 5-development-testing.md 6-logging-registration.md 7-deployment.md 8-querying-endpoints.md 9-package-requirements.md" ;;
         "spark-declarative-pipelines") echo "1-ingestion-patterns.md 2-streaming-patterns.md 3-scd-patterns.md 4-performance-tuning.md 5-python-api.md 6-dlt-migration.md 7-advanced-configuration.md 8-project-initialization.md" ;;
+        "spark-structured-streaming") echo "checkpoint-best-practices.md kafka-streaming.md merge-operations.md multi-sink-writes.md stateful-operations.md stream-static-joins.md stream-stream-joins.md streaming-best-practices.md trigger-and-cost-optimization.md" ;;
+        "vector-search") echo "index-types.md" ;;
         *) echo "" ;;
     esac
 }
@@ -306,14 +312,8 @@ download_skill() {
 
     echo -e "\n${BLUE}Processing skill: ${skill_name}${NC}"
 
-    # Check if skill already exists
+    # Remove existing skill directory to ensure clean install
     if [ -d "$skill_dir" ]; then
-        echo -e "${YELLOW}  Skill '$skill_name' already exists.${NC}"
-        read -p "  Overwrite? (y/N): " overwrite
-        if [ "$overwrite" != "y" ] && [ "$overwrite" != "Y" ]; then
-            echo -e "  ${YELLOW}Skipped.${NC}"
-            return 0
-        fi
         rm -rf "$skill_dir"
     fi
 

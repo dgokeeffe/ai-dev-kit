@@ -1,5 +1,6 @@
 # Databricks AI Dev Kit
 .ai-dev-kit/
+.claude/
 
 # Agent/IDE working files
 .claude/
@@ -19,9 +20,10 @@ dist/
 downloads/
 eggs/
 .eggs/
-# Python build artifacts (use top-level only to avoid matching src/lib/)
-/lib/
-/lib64/
+lib/
+lib64/
+# Exception: frontend source lib (Python ignores lib/ for build artifacts)
+!databricks-builder-app/client/src/lib/
 parts/
 sdist/
 var/
@@ -58,6 +60,9 @@ Thumbs.db
 !**/tsconfig*.json
 *.secret
 credentials.json
+
+# Resource tracking manifest (created by MCP server)
+.databricks-resources.json
 
 # Test coverage
 .coverage

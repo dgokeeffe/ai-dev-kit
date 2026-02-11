@@ -1,122 +1,83 @@
-// Project types
+/**
+ * Types matching the backend API and DB models.
+ */
+
+/** Current user info from GET /api/me */
+export interface UserInfo {
+  user: string;
+  workspace_url: string | null;
+  lakebase_configured: boolean;
+  lakebase_project_id: string | null;
+  lakebase_error: string | null;
+}
+
+/** Project from API (projects list/detail) */
 export interface Project {
   id: string;
   name: string;
   user_email: string;
-  template?: string;
-  created_at: string;
-  conversations: Conversation[];
+  created_at: string | null;
+  conversation_count: number;
 }
 
-// Conversation types
+/** Conversation summary (list) or full (detail with messages) */
 export interface Conversation {
   id: string;
   project_id: string;
   title: string;
-  created_at: string;
-  session_id?: string;
-  cluster_id?: string;
-  warehouse_id?: string;
-  default_catalog?: string;
-  default_schema?: string;
-  workspace_folder?: string;
+  created_at: string | null;
+  session_id?: string | null;
+  cluster_id?: string | null;
+  default_catalog?: string | null;
+  default_schema?: string | null;
+  warehouse_id?: string | null;
+  workspace_folder?: string | null;
   messages?: Message[];
+  message_count?: number;
 }
 
-// Message types
+/** Single message in a conversation */
 export interface Message {
   id: string;
   conversation_id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant';
   content: string;
-  timestamp: string;
+  timestamp: string | null;
   is_error: boolean;
 }
 
-// Todo types (from Claude agent)
+/** Databricks cluster from GET /api/clusters */
+export interface Cluster {
+  cluster_id: string;
+  cluster_name: string | null;
+  state: string;
+  creator_user_name?: string | null;
+}
+
+/** Databricks SQL warehouse from GET /api/warehouses */
+export interface Warehouse {
+  warehouse_id: string;
+  warehouse_name: string | null;
+  state: string;
+  cluster_size?: string | null;
+  creator_name?: string | null;
+}
+
+/** Todo item from agent TodoWrite tool */
 export interface TodoItem {
-  id: string;
+  id?: string;
   content: string;
   status: 'pending' | 'in_progress' | 'completed';
 }
 
-// Branding config from backend
-export interface BrandingConfig {
-  app_title: string;
-  partner_name: string;
-  show_databricks_logo: boolean;
-}
-
-// User info type
-export interface UserInfo {
-  user: string | null;
-  workspace_url: string | null;
-  database_available: boolean;
-  lakebase_configured: boolean;
-  lakebase_error: string | null;
-  branding?: BrandingConfig;
-}
-
-// Cluster types
-export interface Cluster {
-  cluster_id: string;
-  cluster_name: string;
-  state: 'RUNNING' | 'PENDING' | 'TERMINATED' | 'RESTARTING' | 'TERMINATING' | 'ERROR' | 'UNKNOWN';
-  spark_version?: string;
-  node_type_id?: string;
-}
-
-// Warehouse types
-export interface Warehouse {
-  warehouse_id: string;
-  warehouse_name: string;
-  state: 'RUNNING' | 'STOPPED' | 'STARTING' | 'STOPPING' | 'DELETED' | 'DELETING';
-  cluster_size?: string;
-  warehouse_type?: string;
-}
-
-// File types for the editor
-export interface FileNode {
-  name: string;
-  path: string;
-  type: 'file' | 'directory';
-  children?: FileNode[];
-  size?: number;
-  modified?: string;
-}
-
-export interface FileContent {
-  path: string;
-  content: string;
-  encoding?: string;
-  size?: number;
-  modified?: string;
-}
-
-// Deploy types
-export interface DeployStatus {
-  status: 'idle' | 'deploying' | 'success' | 'error';
-  app_url?: string;
-  error?: string;
-  started_at?: string;
-  completed_at?: string;
-}
-
-export interface DeployLog {
-  timestamp: string;
-  level: 'info' | 'warning' | 'error';
-  message: string;
-}
-
-// Skill types
-export interface Skill {
-  name: string;
-  description: string;
-  content?: string;
-}
-
-// Agent event types
-export interface AgentEvent {
-  type: string;
-  [key: string]: unknown;
+/** Active or recent execution from GET .../executions */
+export interface Execution {
+  id: string;
+  conversation_id: string;
+  project_id: string;
+  status: string;
+  events: unknown[];
+  error?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }

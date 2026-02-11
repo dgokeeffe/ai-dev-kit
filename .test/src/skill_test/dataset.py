@@ -90,7 +90,18 @@ class UCDatasetSource:
 def get_dataset_source(skill_name: str, base_path: Path = None) -> DatasetSource:
     """Get the appropriate dataset source for a skill."""
     if base_path is None:
-        base_path = Path(".test/skills")
+        # Try relative to this module first (works from any cwd)
+        module_base = Path(__file__).parent.parent / "skills"
+        if module_base.exists():
+            base_path = module_base
+        else:
+            # Fallback: try common paths
+            for candidate in [Path("skills"), Path(".test/skills")]:
+                if candidate.exists():
+                    base_path = candidate
+                    break
+            else:
+                base_path = Path(".test/skills")
 
     yaml_path = base_path / skill_name / "ground_truth.yaml"
     if yaml_path.exists():
