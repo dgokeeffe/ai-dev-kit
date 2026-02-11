@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.ruff_cache/
+workspaces/
+client/node_modules/
+client/dist/
+client/tsconfig.tsbuildinfo
+.env
+.env.*

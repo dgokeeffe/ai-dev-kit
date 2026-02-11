@@ -1,0 +1,84 @@
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  Vibe Coding Workshop - Asset Bundle (Git Integration)                 ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+#
+# Provisions workshop worker apps with Git repository integration.
+# Each worker handles ~30-50 concurrent Claude Code sessions.
+#
+# Quick Start:
+#   1. Push changes:       git add . && git commit -m "Update" && git push
+#   2. Provision the app:  databricks bundle deploy -t dev
+#   3. Deploy from Git:    ./scripts/deploy-workshop.sh --prefix vibe --workers 1
+#
+# For a full workshop (10 workers, 300 sessions):
+#   ./scripts/deploy-workshop.sh --prefix vibe --workers 10
+
+bundle:
+  name: databricks-workshop
+
+sync:
+  include:
+    - "server/**"
+    - "client/**"
+    - "scripts/**"
+    - "skills/**"
+    - "app.yaml"
+  exclude:
+    - "**/__pycache__"
+    - "**/*.pyc"
+    - "**/.env*"
+    - "**/node_modules"
+    - ".venv/**"
+    - "workspaces/**"
+    - "client/node_modules/**"
+
+resources:
+  apps:
+    workshop_app:
+      name: ${var.app_name}
+      description: "Vibe Coding Workshop — Claude Code terminal sessions"
+      source_code_path: .
+      git_repository:
+        provider: "gitHub"
+        url: ${var.git_repo_url}
+      resources:
+        # Foundation Model endpoints for Claude Code
+        - name: claude-sonnet-45
+          serving_endpoint:
+            name: databricks-claude-sonnet-4-5
+            permission: CAN_QUERY
+        - name: claude-opus-46
+          serving_endpoint:
+            name: databricks-claude-opus-4-6
+            permission: CAN_QUERY
+        # Secret scope for Claude API token
+        # Provision with: databricks secrets put-secret <scope> <key> --string-value <token>
+        - name: claude-pat
+          secret:
+            scope: ${var.pat_secret_scope}
+            key: ${var.pat_secret_key}
+            permission: READ
+
+variables:
+  app_name:
+    description: "Name of the workshop Databricks App"
+    default: "vibe-workshop"
+  git_repo_url:
+    description: "Git repository URL"
+    default: "https://github.com/databricks-solutions/ai-dev-kit"
+  pat_secret_scope:
+    description: "Secret scope containing the Claude API token"
+    default: "workshop-pat"
+  pat_secret_key:
+    description: "Secret key for the Claude API token"
+    default: "claude-api-token"
+
+targets:
+  dev:
+    mode: development
+    default: true
+
+  prod:
+    mode: production
+    variables:
+      app_name: vibe-workshop-prod

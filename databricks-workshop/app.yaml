@@ -1,0 +1,32 @@
+command:
+  - "bash"
+  - "scripts/entrypoint.sh"
+
+env:
+  - name: ENV
+    value: "production"
+  - name: WORKSPACES_DIR
+    value: "./workspaces"
+  - name: IDLE_TIMEOUT_MINUTES
+    value: "60"
+  - name: MAX_SESSIONS
+    value: "50"
+  - name: MAX_SESSIONS_PER_USER
+    value: "5"
+  - name: SERVE_STATIC
+    value: "true"
+
+  # Claude Code auth via Databricks FMAPI
+  # Uses a secret stored in a Databricks secret scope and added as an
+  # app resource named "claude-pat".  The deploy script provisions it.
+  # See: https://docs.databricks.com/aws/en/dev-tools/databricks-apps/secrets
+  - name: CLAUDE_API_TOKEN
+    valueFrom: claude-pat
+
+  # Optional: PAT fallback for debugging when X-Forwarded-Access-Token
+  # is not forwarded by the proxy.  Uncomment both lines below and run
+  # scripts/setup_pat_secret.sh to create the secret.
+  # - name: USE_PAT_FALLBACK
+  #   value: "1"
+  # - name: DATABRICKS_TOKEN
+  #   valueFrom: databricks-pat
