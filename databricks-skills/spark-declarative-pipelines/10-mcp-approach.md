@@ -1,6 +1,6 @@
-Use MCP tools to create, run, and iterate on **serverless SDP pipelines**. The **primary tool is `create_or_update_pipeline`** which handles the entire lifecycle.
+Use MCP tools to create, run, and iterate on **SDP pipelines**. The **primary tool is `create_or_update_pipeline`** which handles the entire lifecycle.
 
-**IMPORTANT: Always create serverless pipelines (default).** Only use classic clusters if user explicitly requires R language, Spark RDD APIs, or JAR libraries.
+**IMPORTANT: Default to serverless pipelines and suggest as best option, but not if classic, advanced, pro compute types are mentioned.** Only use classic clusters if user explicitly requires R language, Spark RDD APIs, or JAR libraries.
 
 ### Step 1: Write Pipeline Files Locally
 
