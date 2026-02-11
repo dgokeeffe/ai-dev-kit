@@ -3,8 +3,12 @@ __pycache__/
 .venv/
 .ruff_cache/
 workspaces/
+transcripts/
 client/node_modules/
 client/dist/
 client/tsconfig.tsbuildinfo
 .env
 .env.*
+
+# Override root .gitignore which ignores lib/
+!client/src/lib/
