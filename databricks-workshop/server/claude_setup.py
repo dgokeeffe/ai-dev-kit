@@ -22,6 +22,30 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Git repo cloning
+# ---------------------------------------------------------------------------
+
+
+def clone_repo(repo_url: str, target_dir: str, timeout: int = 120) -> None:
+    """Clone a Git repo into the target directory.
+
+    Skips if target_dir already contains a .git directory (idempotent).
+    Raises RuntimeError on clone failure.
+    """
+    if (Path(target_dir) / ".git").exists():
+        logger.info("Repo already cloned at %s, skipping", target_dir)
+        return
+
+    result = subprocess.run(
+        ["git", "clone", repo_url, target_dir],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
+    logger.info("Cloned %s into %s", repo_url, target_dir)
+
+
+# ---------------------------------------------------------------------------
 # Claude Code CLI settings
 # ---------------------------------------------------------------------------
 
@@ -50,8 +74,7 @@ def setup_claude_settings(
             "ANTHROPIC_AUTH_TOKEN": auth_token,
             "ANTHROPIC_BASE_URL": f"{host.rstrip('/')}/serving-endpoints/anthropic",
             "ANTHROPIC_MODEL": model,
-            "ANTHROPIC_CUSTOM_HEADERS": "x-databricks-disable-beta-headers: true",
-            "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
+            "ANTHROPIC_CUSTOM_HEADERS": "x-databricks-use-coding-agent-mode: true",
         },
         "permissions": {
             "allow": [
@@ -64,6 +87,16 @@ def setup_claude_settings(
                 "Skill",
             ],
         },
+        "mcpServers": {
+            "databricks": {
+                "command": "python",
+                "args": ["-m", "databricks_mcp_server.run_server"],
+                "env": {
+                    "DATABRICKS_HOST": host.rstrip("/"),
+                    "DATABRICKS_TOKEN": token,
+                },
+            },
+        },
     }
 
     settings_path = os.path.join(claude_dir, "settings.json")
@@ -74,14 +107,41 @@ def setup_claude_settings(
     logger.info("Wrote Claude settings to %s (using %s)", settings_path, token_source)
 
 
+def setup_claude_onboarding(home_dir: str) -> None:
+    """Write ~/.claude.json to skip onboarding and configure HTTP MCP servers."""
+    claude_json = {
+        "hasCompletedOnboarding": True,
+    }
+    claude_json_path = os.path.join(home_dir, ".claude.json")
+    _atomic_write_json(claude_json_path, claude_json)
+    logger.info("Wrote Claude onboarding config to %s", claude_json_path)
+
+
 # ---------------------------------------------------------------------------
 # Databricks CLI config
 # ---------------------------------------------------------------------------
 
 
 def setup_databricks_config(home_dir: str, host: str, token: str) -> None:
-    """Write ~/.databrickscfg for Databricks CLI access."""
+    """Write ~/.databrickscfg with user and optional SP profiles.
+
+    Writes two profiles:
+      - [DEFAULT] - User's passthrough token (for CLI and user-facing operations)
+      - [service-principal] - SP M2M OAuth credentials (if DATABRICKS_CLIENT_ID is set)
+    """
     config_content = f"[DEFAULT]\nhost = {host}\ntoken = {token}\n"
+
+    # Add service-principal profile if SP credentials are available
+    client_id = os.environ.get("DATABRICKS_CLIENT_ID")
+    client_secret = os.environ.get("DATABRICKS_CLIENT_SECRET")
+    if client_id and client_secret:
+        config_content += (
+            f"\n[service-principal]\n"
+            f"host = {host}\n"
+            f"client_id = {client_id}\n"
+            f"client_secret = {client_secret}\n"
+        )
+
     config_path = os.path.join(home_dir, ".databrickscfg")
     _atomic_write_text(config_path, config_content)
     logger.info("Wrote Databricks config to %s", config_path)
@@ -141,10 +201,10 @@ def write_workshop_claude_md(
 ## Session: {session_name}
 ## User: {user_email}
 
-## Databricks Workspace
+## Databricks workspace
 - Host: {workspace_url or "(not configured)"}
 
-## Workshop Challenge
+## Workshop challenge
 
 Build a complete data platform on Databricks:
 
@@ -152,26 +212,43 @@ Build a complete data platform on Databricks:
 2. **Analytics App** - Build a Dash or Streamlit app that queries your pipeline output
 3. **AI App** - Build an app that uses Databricks Foundation Model API
 
-## Available Tools
+## MCP tools
 
-You have access to Databricks tools via the CLI:
-- `databricks` CLI for workspace, jobs, pipelines, and apps
-- `execute_sql` / SQL queries via `databricks sql`
-- File uploads via `databricks workspace import`
+You have 50+ Databricks MCP tools available via the `databricks` MCP server. Key tools:
+- `execute_sql` - Run SQL queries against warehouses
+- `create_pipeline` / `list_pipelines` - Manage Lakeflow pipelines
+- `list_jobs` / `create_job` - Manage Databricks jobs
+- `list_serving_endpoints` - Manage model serving endpoints
+- `list_tables` / `get_table` - Browse Unity Catalog tables
 
-## Available Skills
+Use these tools directly - they are pre-configured with your credentials.
+
+## Authentication
+
+- The `databricks` CLI uses your user token by default ([DEFAULT] profile)
+- For service principal operations, use `--profile service-principal`
+- MCP tools automatically use your user token
+
+## Available skills
 
 Load skills with the Skill tool:
 {skill_lines}
 
-## Tips
+## Deployment workflow
 
-- Use `databricks apps deploy <name> --json '{{"git_source": ...}}'` for git-based app deployment
+### Git-based deploy
+1. Commit and push your changes: `git add . && git commit -m "Update" && git push`
+2. Deploy the bundle: `databricks bundle deploy -t dev`
+3. Deploy the app from git:
+   ```
+   databricks apps deploy <app-name> --json '{{"git_source": {{"branch": "main", "source_code_path": "databricks-workshop"}}}}'
+   ```
+
+### Quick deploy
 - Run `dbx-new <template>` to scaffold app projects (streamlit, dash, flask)
 - Run `dbx-deploy <app-name>` to deploy the current directory as an app
-- Commit frequently - files sync to your workspace on commit
 
-## Resources Created
+## Resources created
 
 ### Tables
 (none yet)
@@ -285,6 +362,8 @@ def prepare_session_environment(
     )
 
     try:
+        setup_claude_onboarding(home_dir)
+
         if host and token:
             setup_claude_settings(home_dir, host, token)
             setup_databricks_config(home_dir, host, token)

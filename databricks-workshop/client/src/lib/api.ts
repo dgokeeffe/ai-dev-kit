@@ -102,6 +102,7 @@ export async function listSessions(): Promise<Session[]> {
 export interface CreateSessionOpts {
   session_name: string;
   workspace_dir?: string;
+  repo_url?: string;
   initial_prompt?: string;
 }
 

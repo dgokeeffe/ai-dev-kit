@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .claude_setup import (
+    clone_repo,
     get_available_skills,
     prepare_session_environment,
 )
@@ -210,6 +211,7 @@ async def create_session(request: Request):
     body = await request.json()
     session_name = body.get("session_name", "default")
     custom_workspace = body.get("workspace_dir")
+    repo_url = body.get("repo_url")
     initial_prompt = body.get("initial_prompt")
 
     # Resolve config needed for environment setup
@@ -226,7 +228,14 @@ async def create_session(request: Request):
     )
 
     if not custom_workspace:
-        workspace_dir.mkdir(parents=True, exist_ok=True)
+        if repo_url:
+            # Clone repo into workspace (skips if already cloned)
+            try:
+                clone_repo(repo_url, str(workspace_dir))
+            except RuntimeError as e:
+                return JSONResponse(status_code=400, content={"error": str(e)})
+        else:
+            workspace_dir.mkdir(parents=True, exist_ok=True)
 
         # Load saved memory BEFORE env setup (so template write is skipped)
         await load_user_memory(email, workspace_dir)

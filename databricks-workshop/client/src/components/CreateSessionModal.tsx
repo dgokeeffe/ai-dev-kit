@@ -5,6 +5,7 @@ interface CreateSessionModalProps {
   onCreate: (opts: {
     session_name: string;
     workspace_dir?: string;
+    repo_url?: string;
     initial_prompt?: string;
   }) => Promise<void>;
 }
@@ -22,6 +23,7 @@ export default function CreateSessionModal({
 }: CreateSessionModalProps) {
   const [selected, setSelected] = useState("custom");
   const [customName, setCustomName] = useState("");
+  const [repoUrl, setRepoUrl] = useState("");
   const [workspaceDir, setWorkspaceDir] = useState("");
   const [initialPrompt, setInitialPrompt] = useState("");
   const [creating, setCreating] = useState(false);
@@ -33,6 +35,7 @@ export default function CreateSessionModal({
     try {
       await onCreate({
         session_name: name,
+        repo_url: repoUrl.trim() || undefined,
         workspace_dir: workspaceDir.trim() || undefined,
         initial_prompt: initialPrompt.trim() || undefined,
       });
@@ -82,18 +85,41 @@ export default function CreateSessionModal({
           />
         )}
 
+        {/* Git repository URL (optional) */}
+        <div className="mb-3">
+          <label className="block text-xs text-gray-400 mb-1">
+            Git repository URL{" "}
+            <span className="text-gray-600">(optional - clones into session workspace)</span>
+          </label>
+          <input
+            type="text"
+            value={repoUrl}
+            onChange={(e) => {
+              setRepoUrl(e.target.value);
+              if (e.target.value.trim()) setWorkspaceDir("");
+            }}
+            placeholder="https://github.com/you/my-app"
+            disabled={!!workspaceDir.trim()}
+            className="w-full px-3 py-2 bg-databricks-darker border border-databricks-slate rounded-md text-white text-sm placeholder-gray-600 focus:outline-none focus:border-databricks-red font-mono disabled:opacity-40 disabled:cursor-not-allowed"
+          />
+        </div>
+
         {/* Workspace directory (optional) */}
         <div className="mb-3">
           <label className="block text-xs text-gray-400 mb-1">
             Workspace directory{" "}
-            <span className="text-gray-600">(optional — use an existing repo)</span>
+            <span className="text-gray-600">(optional - use an existing local repo)</span>
           </label>
           <input
             type="text"
             value={workspaceDir}
-            onChange={(e) => setWorkspaceDir(e.target.value)}
+            onChange={(e) => {
+              setWorkspaceDir(e.target.value);
+              if (e.target.value.trim()) setRepoUrl("");
+            }}
             placeholder="/Users/you/Repos/my-project"
-            className="w-full px-3 py-2 bg-databricks-darker border border-databricks-slate rounded-md text-white text-sm placeholder-gray-600 focus:outline-none focus:border-databricks-red font-mono"
+            disabled={!!repoUrl.trim()}
+            className="w-full px-3 py-2 bg-databricks-darker border border-databricks-slate rounded-md text-white text-sm placeholder-gray-600 focus:outline-none focus:border-databricks-red font-mono disabled:opacity-40 disabled:cursor-not-allowed"
           />
         </div>
 
