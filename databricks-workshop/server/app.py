@@ -24,6 +24,7 @@ from .claude_setup import (
     get_available_skills,
     prepare_session_environment,
 )
+from .memory import load_user_memory, save_user_memory
 from .session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
@@ -34,11 +35,11 @@ logging.basicConfig(
 
 manager = SessionManager()
 
-# Resolve skills directory: local skills/ first, then monorepo sibling
+# Resolve skills directory: monorepo sibling (21 skills) first, then local fallback (6 skills)
 _APP_ROOT = Path(__file__).parent.parent
 _SKILLS_DIRS = [
-    _APP_ROOT / "skills",
     _APP_ROOT.parent / "databricks-skills",
+    _APP_ROOT / "skills",
 ]
 SKILLS_DIR: Path | None = next((d for d in _SKILLS_DIRS if d.exists()), None)
 
@@ -46,13 +47,57 @@ SKILLS_DIR: Path | None = next((d for d in _SKILLS_DIRS if d.exists()), None)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start cleanup loop on startup, stop all sessions on shutdown."""
+    # Initialize Lakebase memory persistence (if configured)
+    from .db.database import is_postgres_configured
+
+    if is_postgres_configured():
+        try:
+            from .db.database import (
+                create_tables,
+                init_database,
+                is_dynamic_token_mode,
+                start_token_refresh,
+                stop_token_refresh,
+            )
+
+            init_database()
+            await create_tables()
+            if is_dynamic_token_mode():
+                await start_token_refresh()
+            logger.info("Lakebase memory persistence initialized")
+        except Exception as e:
+            logger.warning("Lakebase init failed (non-fatal): %s", e)
+    else:
+        logger.info("Lakebase not configured - session memory disabled")
+
+    # Register memory-save callback for idle cleanup
+    manager._on_stop_callback = save_user_memory
+
     manager.start_cleanup_loop()
     if SKILLS_DIR:
         logger.info("Skills directory: %s", SKILLS_DIR)
     else:
         logger.warning("No skills directory found")
+
     yield
+
+    # Shutdown: save memory for all active sessions, then stop
+    for session in list(manager._sessions.values()):
+        if session.alive:
+            try:
+                await save_user_memory(session.user_email, session.workspace_dir)
+            except Exception as e:
+                logger.warning("Failed to save memory on shutdown: %s", e)
+
     manager.stop_all()
+
+    if is_postgres_configured():
+        try:
+            from .db.database import stop_token_refresh
+
+            await stop_token_refresh()
+        except Exception:
+            pass
 
 
 app = FastAPI(title="Vibe Coding Workshop", lifespan=lifespan)
@@ -182,6 +227,10 @@ async def create_session(request: Request):
 
     if not custom_workspace:
         workspace_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load saved memory BEFORE env setup (so template write is skipped)
+        await load_user_memory(email, workspace_dir)
+
         try:
             prepare_session_environment(
                 home_dir=home_dir,
@@ -244,6 +293,10 @@ async def delete_session(request: Request, session_id: str):
         return JSONResponse(status_code=404, content={"error": "Session not found"})
     if session.user_email != email:
         return JSONResponse(status_code=403, content={"error": "Not your session"})
+
+    # Save memory before stopping
+    await save_user_memory(email, session.workspace_dir)
+
     manager.stop_session(session_id)
     return {"status": "stopped"}
 

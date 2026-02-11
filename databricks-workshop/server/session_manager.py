@@ -109,6 +109,9 @@ class SessionManager:
         self._sessions: dict[str, ClaudeSession] = {}
         self._lock = Lock()
         self._cleanup_task: asyncio.Task | None = None
+        self._on_stop_callback: (
+            None | callable  # async fn(user_email, workspace_dir) -> None
+        ) = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -121,11 +124,11 @@ class SessionManager:
         while True:
             await asyncio.sleep(60)
             try:
-                self._cleanup_idle()
+                await self._cleanup_idle()
             except Exception:
                 logger.exception("Error in session cleanup loop")
 
-    def _cleanup_idle(self) -> None:
+    async def _cleanup_idle(self) -> None:
         to_remove: list[str] = []
 
         with self._lock:
@@ -145,6 +148,17 @@ class SessionManager:
                     to_remove.append(sid)
 
         for sid in to_remove:
+            # Run the on-stop callback (e.g. save memory) before killing
+            session = self.get_session(sid)
+            if session and self._on_stop_callback:
+                try:
+                    await self._on_stop_callback(
+                        session.user_email, session.workspace_dir
+                    )
+                except Exception:
+                    logger.exception(
+                        "on_stop_callback failed for session %s", sid
+                    )
             self.stop_session(sid)
 
     # ------------------------------------------------------------------
@@ -227,12 +241,13 @@ class SessionManager:
             "LANG": "en_US.UTF-8",
             "PATH": f"{home_dir}/.local/bin:{os.environ.get('PATH', '/usr/bin')}",
         }
-        # Strip OAuth tokens that cause scope issues in child
+        # Strip OAuth tokens that cause scope issues in child.
+        # Keep DATABRICKS_CLIENT_ID and DATABRICKS_CLIENT_SECRET so sessions
+        # can use the SP for explicit SDK operations. The .databrickscfg
+        # [DEFAULT] profile (user token) takes precedence for CLI commands.
         for key in list(child_env.keys()):
             if "OAUTH" in key.upper():
                 del child_env[key]
-        child_env.pop("DATABRICKS_CLIENT_ID", None)
-        child_env.pop("DATABRICKS_CLIENT_SECRET", None)
         if env:
             child_env.update(env)
 
@@ -317,16 +332,17 @@ class SessionManager:
     def get_user_sessions(self, user_email: str) -> list[ClaudeSession]:
         return [s for s in self._sessions.values() if s.user_email == user_email]
 
-    def stop_session(self, session_id: str) -> None:
+    def stop_session(self, session_id: str) -> ClaudeSession | None:
+        """Stop and remove a session, returning it for post-stop operations."""
         with self._lock:
             session = self._sessions.pop(session_id, None)
 
         if session is None:
-            return
+            return None
 
         session.alive = False
 
-        # Kill the process first — causes PTY EOF so the reader exits fast
+        # Kill the process first - causes PTY EOF so the reader exits fast
         try:
             os.killpg(os.getpgid(session.pid), signal.SIGTERM)
         except (OSError, ProcessLookupError):
@@ -335,7 +351,7 @@ class SessionManager:
             except OSError:
                 pass
 
-        # Close PTY fd — signals the reader thread to exit
+        # Close PTY fd - signals the reader thread to exit
         try:
             os.close(session.master_fd)
         except OSError:
@@ -353,6 +369,7 @@ class SessionManager:
             session.user_email,
             session.session_name,
         )
+        return session
 
     def stop_all(self) -> None:
         with self._lock:

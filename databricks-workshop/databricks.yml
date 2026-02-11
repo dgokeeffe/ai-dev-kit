@@ -72,6 +72,9 @@ variables:
   pat_secret_key:
     description: "Secret key for the Claude API token"
     default: "claude-api-token"
+  lakebase_instance_name:
+    description: "Lakebase instance name for session memory persistence (optional)"
+    default: ""
 
 targets:
   dev:

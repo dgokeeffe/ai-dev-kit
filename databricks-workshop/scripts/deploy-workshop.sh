@@ -34,6 +34,7 @@ MAX_SESSIONS_PER_WORKER=50
 SECRET_SCOPE="workshop-pat"
 SECRET_KEY="claude-api-token"
 PAT_LIFETIME=7776000  # 90 days
+LAKEBASE_INSTANCE=""
 
 # ---- Parse args ----
 while [[ $# -gt 0 ]]; do
@@ -44,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --git-url)   GIT_URL="$2"; shift 2 ;;
     --source-path) SOURCE_PATH="$2"; shift 2 ;;
     --token)     CLAUDE_TOKEN="$2"; shift 2 ;;
+    --lakebase)  LAKEBASE_INSTANCE="$2"; shift 2 ;;
     --destroy)   DESTROY=true; shift ;;
     -h|--help)
       echo "Usage: $0 [options]"
@@ -55,12 +57,18 @@ while [[ $# -gt 0 ]]; do
       echo "  --git-url <url>     Git repo URL"
       echo "  --source-path <p>   Path within repo (default: databricks-workshop)"
       echo "  --token <token>     Claude API token to set as secret"
+      echo "  --lakebase <name>   Lakebase instance for session memory persistence"
       echo "  --destroy           Tear down all workshop apps"
       echo ""
       echo "Examples:"
       echo "  $0 --prefix vibe --workers 10              # Full workshop"
       echo "  $0 --prefix vibe --workers 1               # Dev/test"
       echo "  $0 --prefix vibe --workers 10 --destroy    # Cleanup"
+      echo ""
+      echo "Git-based deploy workflow:"
+      echo "  1. git add . && git commit -m 'Update' && git push"
+      echo "  2. databricks bundle deploy -t dev"
+      echo "  3. databricks apps deploy <app-name> --json '{\"git_source\": {\"branch\": \"main\", \"source_code_path\": \"databricks-workshop\"}}'"
       exit 0
       ;;
     *) echo -e "${RED}Unknown option: $1${NC}"; exit 1 ;;
@@ -83,6 +91,9 @@ echo -e "  Workers:      ${GREEN}${NUM_WORKERS}${NC}"
 echo -e "  Git Branch:   ${GREEN}${GIT_BRANCH}${NC}"
 echo -e "  Git URL:      ${GIT_URL}"
 echo -e "  Source Path:  ${SOURCE_PATH}"
+if [ -n "$LAKEBASE_INSTANCE" ]; then
+  echo -e "  Lakebase:     ${GREEN}${LAKEBASE_INSTANCE}${NC}"
+fi
 echo -e "  Total Capacity: ~$(( NUM_WORKERS * MAX_SESSIONS_PER_WORKER )) sessions"
 echo ""
 
@@ -127,17 +138,42 @@ for i in $(seq 1 "$NUM_WORKERS"); do
     echo -e "    ${GREEN}✓${NC} App exists"
   else
     echo -n "    Creating app... "
-    databricks apps create "$APP_NAME" --json '{
-      "description": "Vibe Workshop Worker '"$i"'",
-      "resources": [
+    # Build resources JSON - always include model endpoints
+    APP_RESOURCES='[
         {"name": "claude-sonnet-45", "serving_endpoint": {"name": "databricks-claude-sonnet-4-5", "permission": "CAN_QUERY"}},
-        {"name": "claude-opus-46", "serving_endpoint": {"name": "databricks-claude-opus-4-6", "permission": "CAN_QUERY"}}
-      ]
-    }' 2>&1 || {
+        {"name": "claude-opus-46", "serving_endpoint": {"name": "databricks-claude-opus-4-6", "permission": "CAN_QUERY"}}'
+    # Add Lakebase resource if configured
+    if [ -n "$LAKEBASE_INSTANCE" ]; then
+      APP_RESOURCES="${APP_RESOURCES},
+        {\"name\": \"lakebase\", \"database\": {\"instance_name\": \"${LAKEBASE_INSTANCE}\", \"permission\": \"READ_WRITE\"}}"
+    fi
+    APP_RESOURCES="${APP_RESOURCES}]"
+
+    databricks apps create "$APP_NAME" --json "{
+      \"description\": \"Vibe Workshop Worker ${i}\",
+      \"resources\": ${APP_RESOURCES}
+    }" 2>&1 || {
       echo -e "${RED}failed${NC}"
       continue
     }
     echo -e "${GREEN}done${NC}"
+  fi
+
+  # Configure OAuth scopes for full workshop capabilities
+  echo -n "    Setting OAuth scopes... "
+  SCOPES='["sql","pipelines","jobs","workspace.files","serving-endpoints","iam.current-user:read","iam.access-control:read"]'
+  databricks api patch "/api/2.0/apps/${APP_NAME}" \
+    --json "{\"api_scopes\": ${SCOPES}}" 2>/dev/null \
+    && echo -e "${GREEN}done${NC}" \
+    || echo -e "${YELLOW}skipped (set scopes manually in app settings)${NC}"
+
+  # Set Lakebase env var if configured
+  if [ -n "$LAKEBASE_INSTANCE" ]; then
+    echo -n "    Setting LAKEBASE_INSTANCE_NAME env var... "
+    databricks api patch "/api/2.0/apps/${APP_NAME}" \
+      --json "{\"env\": [{\"name\": \"LAKEBASE_INSTANCE_NAME\", \"value\": \"${LAKEBASE_INSTANCE}\"}, {\"name\": \"LAKEBASE_DATABASE_NAME\", \"value\": \"databricks_postgres\"}]}" 2>/dev/null \
+      && echo -e "${GREEN}done${NC}" \
+      || echo -e "${YELLOW}skipped (set env vars manually)${NC}"
   fi
 
   # Provision Claude API token using secret scope + app resource

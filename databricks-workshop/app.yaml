@@ -23,6 +23,12 @@ env:
   - name: CLAUDE_API_TOKEN
     valueFrom: claude-pat
 
+  # Lakebase memory persistence (optional - app works without these)
+  - name: LAKEBASE_INSTANCE_NAME
+    value: ""
+  - name: LAKEBASE_DATABASE_NAME
+    value: "databricks_postgres"
+
   # Optional: PAT fallback for debugging when X-Forwarded-Access-Token
   # is not forwarded by the proxy.  Uncomment both lines below and run
   # scripts/setup_pat_secret.sh to create the secret.
