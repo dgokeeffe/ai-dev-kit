@@ -231,6 +231,8 @@ class SessionManager:
         for key in list(child_env.keys()):
             if "OAUTH" in key.upper():
                 del child_env[key]
+        child_env.pop("DATABRICKS_CLIENT_ID", None)
+        child_env.pop("DATABRICKS_CLIENT_SECRET", None)
         if env:
             child_env.update(env)
 
@@ -457,6 +459,19 @@ class SessionManager:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def compute_workspace_dir(
+        user_email: str, session_name: str, workspace_override: str | None = None
+    ) -> Path:
+        """Pre-compute the workspace path without spawning anything.
+
+        Lets callers run setup (e.g. write settings.json) before the fork.
+        """
+        if workspace_override:
+            return Path(workspace_override)
+        user_hash = hashlib.sha256(user_email.lower().encode()).hexdigest()[:12]
+        return WORKSPACES_DIR / user_hash / session_name
 
     @staticmethod
     def _resolve_claude_binary() -> str:

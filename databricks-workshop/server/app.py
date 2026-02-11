@@ -167,24 +167,25 @@ async def create_session(request: Request):
     custom_workspace = body.get("workspace_dir")
     initial_prompt = body.get("initial_prompt")
 
-    # Prepare the session environment before spawning PTY
+    # Resolve config needed for environment setup
     host = os.getenv("DATABRICKS_HOST", "")
+    if host and not host.startswith("http"):
+        host = f"https://{host}"
     token = _get_databricks_token(request=request)
     home_dir = os.environ.get("HOME", "/tmp/workshop-home")
 
-    try:
-        session = manager.create_session(
-            email, session_name, workspace_override=custom_workspace
-        )
-    except RuntimeError as e:
-        return JSONResponse(status_code=503, content={"error": str(e)})
+    # Pre-compute workspace path and run environment setup BEFORE spawning PTY
+    # so that settings.json exists when Claude Code starts.
+    workspace_dir = SessionManager.compute_workspace_dir(
+        email, session_name, workspace_override=custom_workspace
+    )
 
-    # Run environment setup (skip for custom workspaces — user's repo)
     if not custom_workspace:
+        workspace_dir.mkdir(parents=True, exist_ok=True)
         try:
             prepare_session_environment(
                 home_dir=home_dir,
-                session_workspace=session.workspace_dir,
+                session_workspace=str(workspace_dir),
                 host=host,
                 token=token,
                 user_email=email,
@@ -193,6 +194,13 @@ async def create_session(request: Request):
             )
         except Exception as e:
             logger.error("Session env setup failed (non-fatal): %s", e)
+
+    try:
+        session = manager.create_session(
+            email, session_name, workspace_override=custom_workspace
+        )
+    except RuntimeError as e:
+        return JSONResponse(status_code=503, content={"error": str(e)})
 
     # Inject initial prompt after a short delay (let Claude Code start up)
     if initial_prompt:
