@@ -33,9 +33,9 @@ AI-Driven Development (vibe coding) on Databricks just got a whole lot better. T
 
 ## Choose Your Own Adventure
 
-| Adventure | Best For | Start Here |
-|-----------|----------|------------|
-| :star: [**Install ai-dev-kit**](#install-in-existing-project) | **Start here!** Follow quick install instructions to add to your existing project folder | Quick Start (install)
+| Adventure                        | Best For | Start Here |
+|----------------------------------|----------|------------|
+| :star: [**Install AI Dev Kit**](#install-in-existing-project) | **Start here!** Follow quick install instructions to add to your existing project folder | Quick Start (install)
 | [**Starter Project**](#starter-kit) | Starter project for Claude Code + full Databricks integration | `ai-dev-project/` |
 | [**Visual Builder**](#visual-builder-app) | Web-based UI for Databricks development | `databricks-builder-app/` |
 | [**Skills Only**](#skills-only) | Teaching your AI Databricks patterns (no actions) | Install skills |
