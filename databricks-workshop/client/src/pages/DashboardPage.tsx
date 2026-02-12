@@ -1,20 +1,23 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   fetchMe,
   listSessions,
   createSession,
   deleteSession,
+  getModel,
+  setModel as setModelApi,
   type Session,
   type CreateSessionOpts,
 } from "../lib/api";
 import Terminal from "../components/Terminal";
 import SessionCard from "../components/SessionCard";
 import CreateSessionModal from "../components/CreateSessionModal";
+import SetupScreen from "../components/SetupScreen";
 
 /**
- * Workshop mode: auto-creates these sessions on first visit.
- * Personal mode (MODE=personal env var): no auto-create.
+ * Workshop mode: shows setup screen on first visit for repo URLs.
+ * Personal mode (MODE=personal env var): no setup screen.
  */
 const WORKSHOP_MODE =
   !(import.meta as any).env?.VITE_MODE ||
@@ -41,7 +44,7 @@ export default function DashboardPage() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const autoCreatedRef = useRef(false);
+  const [model, setModel] = useState("databricks-claude-sonnet-4-5");
 
   // ---- Load user + sessions ----
   const refresh = useCallback(async () => {
@@ -61,32 +64,14 @@ export default function DashboardPage() {
       })
       .catch(() => navigate("/"));
 
+    getModel().then(setModel).catch(() => {});
+
     refresh().finally(() => setLoading(false));
 
     // Poll for session status updates
     const interval = setInterval(refresh, 10_000);
     return () => clearInterval(interval);
   }, [navigate, refresh]);
-
-  // ---- Auto-create default sessions (workshop mode only) ----
-  useEffect(() => {
-    if (!WORKSHOP_MODE) return;
-    if (loading || sessions.length > 0 || autoCreatedRef.current) return;
-
-    // Guard against StrictMode double-fire
-    autoCreatedRef.current = true;
-
-    (async () => {
-      for (const { name } of DEFAULT_SESSIONS) {
-        try {
-          await createSession(name);
-        } catch {
-          break;
-        }
-      }
-      await refresh();
-    })();
-  }, [loading, sessions.length, refresh]);
 
   // ---- Select first session by default ----
   useEffect(() => {
@@ -102,8 +87,18 @@ export default function DashboardPage() {
     await refresh();
   };
 
+  const handleModelChange = async (newModel: string) => {
+    setModel(newModel);
+    try {
+      await setModelApi(newModel);
+    } catch {
+      // Revert on failure
+      setModel(model);
+    }
+  };
+
   const handleCreate = async (opts: CreateSessionOpts) => {
-    const s = await createSession(opts);
+    const s = await createSession({ ...opts, model });
     setShowCreate(false);
     setActiveSessionId(s.session_id);
     await refresh();
@@ -117,6 +112,11 @@ export default function DashboardPage() {
         Loading sessions...
       </div>
     );
+  }
+
+  // First visit in workshop mode: show setup screen
+  if (WORKSHOP_MODE && sessions.length === 0) {
+    return <SetupScreen sessionTypes={DEFAULT_SESSIONS} onComplete={refresh} />;
   }
 
   return (
@@ -140,6 +140,14 @@ export default function DashboardPage() {
           <span className="text-sm text-gray-500">{email}</span>
         </div>
         <div className="flex items-center gap-3">
+          <select
+            value={model}
+            onChange={(e) => handleModelChange(e.target.value)}
+            className="px-2 py-1 text-xs bg-databricks-darker border border-databricks-slate rounded text-white focus:outline-none focus:border-databricks-red cursor-pointer"
+          >
+            <option value="databricks-claude-sonnet-4-5">Sonnet 4.5</option>
+            <option value="databricks-claude-opus-4-6">Opus 4.6</option>
+          </select>
           <span className="text-xs text-gray-600">
             {sessions.filter((s) => s.alive).length} active
           </span>
@@ -193,20 +201,8 @@ export default function DashboardPage() {
               </div>
             </>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-gray-600 gap-4">
-              {sessions.length === 0 ? (
-                <>
-                  <p>No sessions running.</p>
-                  <button
-                    onClick={() => setShowCreate(true)}
-                    className="px-4 py-2 text-sm bg-databricks-red hover:bg-red-600 text-white rounded-md transition-colors"
-                  >
-                    Create your first session
-                  </button>
-                </>
-              ) : (
-                "Select a session to begin"
-              )}
+            <div className="h-full flex flex-col items-center justify-center text-gray-600">
+              Select a session to begin
             </div>
           )}
         </div>

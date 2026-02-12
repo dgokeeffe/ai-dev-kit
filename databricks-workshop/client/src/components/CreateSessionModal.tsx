@@ -7,6 +7,7 @@ interface CreateSessionModalProps {
     workspace_dir?: string;
     repo_url?: string;
     initial_prompt?: string;
+    model?: string;
   }) => Promise<void>;
 }
 
@@ -26,6 +27,7 @@ export default function CreateSessionModal({
   const [repoUrl, setRepoUrl] = useState("");
   const [workspaceDir, setWorkspaceDir] = useState("");
   const [initialPrompt, setInitialPrompt] = useState("");
+  const [model, setModel] = useState("databricks-claude-sonnet-4-5");
   const [creating, setCreating] = useState(false);
 
   const handleCreate = async () => {
@@ -38,6 +40,7 @@ export default function CreateSessionModal({
         repo_url: repoUrl.trim() || undefined,
         workspace_dir: workspaceDir.trim() || undefined,
         initial_prompt: initialPrompt.trim() || undefined,
+        model,
       });
     } finally {
       setCreating(false);
@@ -89,7 +92,7 @@ export default function CreateSessionModal({
         <div className="mb-3">
           <label className="block text-xs text-gray-400 mb-1">
             Git repository URL{" "}
-            <span className="text-gray-600">(optional - clones into session workspace)</span>
+            <span className="text-gray-600">(clones into session workspace)</span>
           </label>
           <input
             type="text"
@@ -124,10 +127,10 @@ export default function CreateSessionModal({
         </div>
 
         {/* Initial prompt (optional) */}
-        <div className="mb-4">
+        <div className="mb-3">
           <label className="block text-xs text-gray-400 mb-1">
             Initial prompt{" "}
-            <span className="text-gray-600">(fire-and-forget — runs after startup)</span>
+            <span className="text-gray-600">(fire-and-forget - runs after startup)</span>
           </label>
           <textarea
             value={initialPrompt}
@@ -136,6 +139,19 @@ export default function CreateSessionModal({
             rows={3}
             className="w-full px-3 py-2 bg-databricks-darker border border-databricks-slate rounded-md text-white text-sm placeholder-gray-600 focus:outline-none focus:border-databricks-red resize-y"
           />
+        </div>
+
+        {/* Model selector */}
+        <div className="mb-4">
+          <label className="block text-xs text-gray-400 mb-1">Model</label>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="w-full px-3 py-2 bg-databricks-darker border border-databricks-slate rounded-md text-white text-sm focus:outline-none focus:border-databricks-red cursor-pointer"
+          >
+            <option value="databricks-claude-sonnet-4-5">Sonnet 4.5 (faster)</option>
+            <option value="databricks-claude-opus-4-6">Opus 4.6 (smarter)</option>
+          </select>
         </div>
 
         <div className="flex justify-end gap-2">
@@ -147,7 +163,7 @@ export default function CreateSessionModal({
           </button>
           <button
             onClick={handleCreate}
-            disabled={creating || (selected === "custom" && !customName.trim())}
+            disabled={creating || (selected === "custom" && !customName.trim()) || (!repoUrl.trim() && !workspaceDir.trim())}
             className="px-4 py-2 text-sm bg-databricks-red hover:bg-red-600 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-md transition-colors"
           >
             {creating ? "Creating..." : "Create Session"}

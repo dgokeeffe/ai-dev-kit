@@ -343,6 +343,7 @@ def prepare_session_environment(
     user_email: str,
     session_name: str,
     skills_source: str | Path | None = None,
+    model: str | None = None,
 ) -> None:
     """Run all setup steps before PTY spawn.
 
@@ -365,7 +366,10 @@ def prepare_session_environment(
         setup_claude_onboarding(home_dir)
 
         if host and token:
-            setup_claude_settings(home_dir, host, token)
+            setup_claude_settings(
+                home_dir, host, token,
+                model=model or "databricks-claude-sonnet-4-5",
+            )
             setup_databricks_config(home_dir, host, token)
 
         setup_git_config(str(ws_path), user_email)

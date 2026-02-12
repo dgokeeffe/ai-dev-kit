@@ -9,6 +9,7 @@ Provides:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -190,6 +191,52 @@ async def me(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Model selection
+# ---------------------------------------------------------------------------
+
+_DEFAULT_MODEL = "databricks-claude-sonnet-4-5"
+
+
+@app.get("/api/model")
+async def get_model():
+    """Return the current ANTHROPIC_MODEL from Claude settings."""
+    home_dir = os.environ.get("HOME", "/tmp/workshop-home")
+    settings_path = os.path.join(home_dir, ".claude", "settings.json")
+    try:
+        with open(settings_path) as f:
+            settings = json.load(f)
+        model = settings.get("env", {}).get("ANTHROPIC_MODEL", _DEFAULT_MODEL)
+        return {"model": model}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"model": _DEFAULT_MODEL}
+
+
+@app.put("/api/model")
+async def set_model(request: Request):
+    """Update ANTHROPIC_MODEL in Claude settings (affects all sessions)."""
+    body = await request.json()
+    model = body.get("model", _DEFAULT_MODEL)
+
+    home_dir = os.environ.get("HOME", "/tmp/workshop-home")
+    settings_path = os.path.join(home_dir, ".claude", "settings.json")
+    try:
+        with open(settings_path) as f:
+            settings = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return JSONResponse(
+            status_code=500, content={"error": "Settings file not found"}
+        )
+
+    settings.setdefault("env", {})["ANTHROPIC_MODEL"] = model
+
+    from .claude_setup import _atomic_write_json
+
+    _atomic_write_json(settings_path, settings)
+    logger.info("Model switched to %s", model)
+    return {"model": model}
+
+
+# ---------------------------------------------------------------------------
 # Session CRUD
 # ---------------------------------------------------------------------------
 
@@ -213,6 +260,7 @@ async def create_session(request: Request):
     custom_workspace = body.get("workspace_dir")
     repo_url = body.get("repo_url")
     initial_prompt = body.get("initial_prompt")
+    model = body.get("model")
 
     # Resolve config needed for environment setup
     host = os.getenv("DATABRICKS_HOST", "")
@@ -228,14 +276,16 @@ async def create_session(request: Request):
     )
 
     if not custom_workspace:
-        if repo_url:
-            # Clone repo into workspace (skips if already cloned)
-            try:
-                clone_repo(repo_url, str(workspace_dir))
-            except RuntimeError as e:
-                return JSONResponse(status_code=400, content={"error": str(e)})
-        else:
-            workspace_dir.mkdir(parents=True, exist_ok=True)
+        if not repo_url:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "repo_url is required"},
+            )
+        # Clone repo into workspace (skips if already cloned)
+        try:
+            clone_repo(repo_url, str(workspace_dir))
+        except RuntimeError as e:
+            return JSONResponse(status_code=400, content={"error": str(e)})
 
         # Load saved memory BEFORE env setup (so template write is skipped)
         await load_user_memory(email, workspace_dir)
@@ -249,6 +299,7 @@ async def create_session(request: Request):
                 user_email=email,
                 session_name=session_name,
                 skills_source=SKILLS_DIR,
+                model=model,
             )
         except Exception as e:
             logger.error("Session env setup failed (non-fatal): %s", e)

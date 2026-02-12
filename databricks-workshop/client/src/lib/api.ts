@@ -104,6 +104,7 @@ export interface CreateSessionOpts {
   workspace_dir?: string;
   repo_url?: string;
   initial_prompt?: string;
+  model?: string;
 }
 
 export async function createSession(
@@ -142,4 +143,21 @@ export async function resizeSession(
     method: "POST",
     body: JSON.stringify({ rows, cols }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Model selection
+// ---------------------------------------------------------------------------
+
+export async function getModel(): Promise<string> {
+  const res = await apiFetch<{ model: string }>("/api/model");
+  return res.model;
+}
+
+export async function setModel(model: string): Promise<string> {
+  const res = await apiFetch<{ model: string }>("/api/model", {
+    method: "PUT",
+    body: JSON.stringify({ model }),
+  });
+  return res.model;
 }
