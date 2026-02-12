@@ -4,9 +4,11 @@ __pycache__/
 .ruff_cache/
 workspaces/
 transcripts/
+node_modules/
 client/node_modules/
 client/dist/
 client/tsconfig.tsbuildinfo
+package-lock.json
 .env
 .env.*
 
