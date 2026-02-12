@@ -35,7 +35,7 @@ echo "Workspaces directory: $WORKSPACES_DIR"
 if [ ! -d "$APP_DIR/client/dist" ] && [ -f "$APP_DIR/client/package.json" ]; then
     echo "--- Building frontend ---"
     cd "$APP_DIR/client"
-    npm install --production=false 2>&1 || true
+    npm ci 2>&1 || true
     npm run build 2>&1 || echo "Frontend build failed (non-fatal, API still works)"
     cd "$APP_DIR"
 fi
@@ -46,4 +46,5 @@ cd "$APP_DIR"
 exec uvicorn server.app:app \
     --host 0.0.0.0 \
     --port "${DATABRICKS_APP_PORT:-8000}" \
+    --loop uvloop \
     --log-level info

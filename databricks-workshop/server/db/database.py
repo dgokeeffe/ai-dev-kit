@@ -289,8 +289,8 @@ def init_database(database_url: Optional[str] = None) -> AsyncEngine:
 
     _engine = create_async_engine(
         url,
-        pool_size=int(os.environ.get('DB_POOL_SIZE', '5')),
-        max_overflow=int(os.environ.get('DB_MAX_OVERFLOW', '10')),
+        pool_size=int(os.environ.get('DB_POOL_SIZE', '10')),
+        max_overflow=int(os.environ.get('DB_MAX_OVERFLOW', '20')),
         pool_pre_ping=True,
         pool_recycle=int(os.environ.get('DB_POOL_RECYCLE_INTERVAL', '1800')),
         pool_timeout=int(os.environ.get('DB_POOL_TIMEOUT', '10')),

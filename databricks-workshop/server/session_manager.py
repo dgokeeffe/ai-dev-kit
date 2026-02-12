@@ -421,10 +421,14 @@ class SessionManager:
                 session.touch()
 
                 # Write to transcript file (persistent disk log)
+                # Flush every 32 chunks (~128KB) instead of every chunk
                 if session._transcript_file:
                     try:
                         session._transcript_file.write(data)  # type: ignore[union-attr]
-                        session._transcript_file.flush()  # type: ignore[union-attr]
+                        session._transcript_flush_count = getattr(session, '_transcript_flush_count', 0) + 1
+                        if session._transcript_flush_count >= 32:
+                            session._transcript_file.flush()  # type: ignore[union-attr]
+                            session._transcript_flush_count = 0
                     except Exception:
                         pass  # Don't crash the reader on transcript errors
 
@@ -441,9 +445,10 @@ class SessionManager:
         session.alive = False
         logger.debug("Reader loop ended for session %s", session.session_id)
 
-        # Close transcript file
+        # Flush and close transcript file
         if session._transcript_file:
             try:
+                session._transcript_file.flush()  # type: ignore[union-attr]
                 session._transcript_file.close()  # type: ignore[union-attr]
             except Exception:
                 pass

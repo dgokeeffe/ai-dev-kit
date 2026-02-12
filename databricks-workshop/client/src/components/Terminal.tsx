@@ -99,20 +99,24 @@ export default function Terminal({ sessionId, userEmail }: TerminalProps) {
       wsManager.send(bytes);
     });
 
-    // ---- Resize handling ----
-    const handleResize = () => {
-      fitAddon.fit();
-      const { rows, cols } = term;
-      resizeSession(sessionId, rows, cols).catch(() => {});
-    };
+    // ---- Resize handling (debounce API call, keep fit immediate) ----
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
 
     const resizeObserver = new ResizeObserver(() => {
-      requestAnimationFrame(handleResize);
+      requestAnimationFrame(() => {
+        fitAddon.fit();
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          const { rows, cols } = term;
+          resizeSession(sessionId, rows, cols).catch(() => {});
+        }, 300);
+      });
     });
     resizeObserver.observe(containerRef.current);
 
     // ---- Cleanup ----
     return () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
       dataDisposable.dispose();
       binaryDisposable.dispose();
       resizeObserver.disconnect();

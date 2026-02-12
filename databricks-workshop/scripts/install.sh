@@ -10,20 +10,72 @@ log() { echo "$LOG_PREFIX $*"; }
 export HOME="${HOME:-/tmp/workshop-home}"
 mkdir -p "$HOME"
 
-# --- Node.js (required for Claude Code CLI) ---
+# --- Parallel downloads: Node.js, Databricks CLI, GitHub CLI ---
+mkdir -p "$HOME/.local/bin"
+PIDS=()
+
+# Node.js (required for Claude Code CLI)
 if command -v node &>/dev/null; then
     log "Node.js already installed: $(node --version)"
 else
-    log "Installing Node.js (standalone)..."
-    NODE_VERSION="22.14.0"
-    mkdir -p "$HOME/.local"
-    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
-        | tar -xJ -C "$HOME/.local" --strip-components=1
-    log "Node.js installed: $(node --version)"
+    (
+        log "Installing Node.js (standalone)..."
+        NODE_VERSION="22.14.0"
+        mkdir -p "$HOME/.local"
+        curl -fsSL --max-time 120 --connect-timeout 15 \
+            "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+            | tar -xJ -C "$HOME/.local" --strip-components=1
+        log "Node.js installed"
+    ) &
+    PIDS+=($!)
 fi
+
+# Databricks CLI
+if command -v databricks &>/dev/null; then
+    log "Databricks CLI already installed: $(databricks --version)"
+else
+    (
+        log "Installing Databricks CLI..."
+        curl -fsSL --max-time 120 --connect-timeout 15 \
+            https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh 2>&1 \
+            || log "Warning: Databricks CLI install failed (non-fatal)"
+    ) &
+    PIDS+=($!)
+fi
+
+# GitHub CLI
+if command -v gh &>/dev/null; then
+    log "GitHub CLI already installed: $(gh --version | head -1)"
+else
+    (
+        log "Installing GitHub CLI..."
+        GH_VERSION="2.67.0"
+        curl -fsSL --max-time 120 --connect-timeout 15 \
+            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+            | tar -xz -C /tmp
+        mv "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" "$HOME/.local/bin/gh" 2>/dev/null \
+            || log "Warning: GitHub CLI install failed (non-fatal)"
+        rm -rf "/tmp/gh_${GH_VERSION}_linux_amd64"
+        log "GitHub CLI installed"
+    ) &
+    PIDS+=($!)
+fi
+
+# Wait for all parallel downloads
+for pid in "${PIDS[@]}"; do wait "$pid" || true; done
+
 export PATH="$HOME/.local/bin:$PATH"
 
-# --- Claude Code CLI ---
+# --- Databricks MCP server and tools-core (from monorepo siblings) ---
+if python3 -c "import databricks_mcp_server" 2>/dev/null; then
+    log "databricks-mcp-server already installed"
+else
+    log "Installing databricks-tools-core and databricks-mcp-server..."
+    pip install --quiet "$APP_DIR/../databricks-tools-core" 2>&1 || log "Warning: databricks-tools-core install failed (non-fatal)"
+    pip install --quiet "$APP_DIR/../databricks-mcp-server" 2>&1 || log "Warning: databricks-mcp-server install failed (non-fatal)"
+fi
+
+# --- Claude Code CLI (depends on Node.js) ---
 CLAUDE_BIN="$HOME/.local/bin/claude"
 if [ -x "$CLAUDE_BIN" ]; then
     log "Claude Code CLI already installed"
@@ -38,29 +90,6 @@ else
     else
         log "Claude Code CLI not found at $CLAUDE_BIN (non-fatal)"
     fi
-fi
-
-# --- Databricks CLI ---
-if command -v databricks &>/dev/null; then
-    log "Databricks CLI already installed: $(databricks --version)"
-else
-    log "Installing Databricks CLI..."
-    curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh 2>&1 \
-        || log "Warning: Databricks CLI install failed (non-fatal)"
-fi
-
-# --- GitHub CLI (for git-based app deployment) ---
-if command -v gh &>/dev/null; then
-    log "GitHub CLI already installed: $(gh --version | head -1)"
-else
-    log "Installing GitHub CLI..."
-    GH_VERSION="2.67.0"
-    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
-        | tar -xz -C /tmp
-    mv "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" "$HOME/.local/bin/gh" 2>/dev/null \
-        || log "Warning: GitHub CLI install failed (non-fatal)"
-    rm -rf "/tmp/gh_${GH_VERSION}_linux_amd64"
-    log "GitHub CLI installed"
 fi
 
 # --- Helper scripts ---

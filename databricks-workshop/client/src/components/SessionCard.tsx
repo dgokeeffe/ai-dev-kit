@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Session } from "../lib/api";
 
 interface SessionCardProps {
@@ -8,7 +9,7 @@ interface SessionCardProps {
 }
 
 /** Tab-style session selector shown in the tab bar. */
-export default function SessionCard({
+const SessionCard = memo(function SessionCard({
   session,
   active,
   onClick,
@@ -69,4 +70,6 @@ export default function SessionCard({
       </span>
     </button>
   );
-}
+});
+
+export default SessionCard;

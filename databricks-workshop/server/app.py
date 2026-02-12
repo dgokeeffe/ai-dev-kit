@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import os
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -203,8 +202,11 @@ async def get_model():
     home_dir = os.environ.get("HOME", "/tmp/workshop-home")
     settings_path = os.path.join(home_dir, ".claude", "settings.json")
     try:
-        with open(settings_path) as f:
-            settings = json.load(f)
+        def _read():
+            with open(settings_path) as f:
+                return json.load(f)
+
+        settings = await asyncio.to_thread(_read)
         model = settings.get("env", {}).get("ANTHROPIC_MODEL", _DEFAULT_MODEL)
         return {"model": model}
     except (FileNotFoundError, json.JSONDecodeError):
@@ -220,8 +222,11 @@ async def set_model(request: Request):
     home_dir = os.environ.get("HOME", "/tmp/workshop-home")
     settings_path = os.path.join(home_dir, ".claude", "settings.json")
     try:
-        with open(settings_path) as f:
-            settings = json.load(f)
+        def _read():
+            with open(settings_path) as f:
+                return json.load(f)
+
+        settings = await asyncio.to_thread(_read)
     except (FileNotFoundError, json.JSONDecodeError):
         return JSONResponse(
             status_code=500, content={"error": "Settings file not found"}
@@ -231,7 +236,7 @@ async def set_model(request: Request):
 
     from .claude_setup import _atomic_write_json
 
-    _atomic_write_json(settings_path, settings)
+    await asyncio.to_thread(_atomic_write_json, settings_path, settings)
     logger.info("Model switched to %s", model)
     return {"model": model}
 
@@ -313,10 +318,9 @@ async def create_session(request: Request):
 
     # Inject initial prompt after a short delay (let Claude Code start up)
     if initial_prompt:
-        import threading
 
-        def _delayed_send():
-            time.sleep(3)  # wait for Claude Code to be ready
+        async def _delayed_send():
+            await asyncio.sleep(3)  # wait for Claude Code to be ready
             text = (
                 initial_prompt
                 if initial_prompt.endswith("\n")
@@ -329,7 +333,7 @@ async def create_session(request: Request):
                 len(text),
             )
 
-        threading.Thread(target=_delayed_send, daemon=True).start()
+        asyncio.create_task(_delayed_send())
 
     return session.to_dict()
 
