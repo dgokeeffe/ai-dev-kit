@@ -135,12 +135,31 @@ def before_tag(context, tag: str) -> None:
 # ─── Helpers ────────────────────────────────────────────────────
 
 def _execute_sql(context: Context, sql: str) -> object:
-    """Execute a SQL statement via the Statement Execution API."""
-    return context.workspace.statement_execution.execute_statement(
+    """Execute a SQL statement via the Statement Execution API.
+
+    Polls until terminal state. The API's `wait_timeout` maxes out at 30s — for
+    schema DDL on large catalogs or DROP CASCADE this can return before the
+    statement is actually done, so we poll `get_statement` until it lands.
+    """
+    import time
+    from databricks.sdk.service.sql import StatementState
+
+    response = context.workspace.statement_execution.execute_statement(
         warehouse_id=context.warehouse_id,
         statement=sql,
         wait_timeout="30s",
     )
+    while response.status.state in (StatementState.PENDING, StatementState.RUNNING):
+        time.sleep(2)
+        response = context.workspace.statement_execution.get_statement(
+            response.statement_id
+        )
+    if response.status.state != StatementState.SUCCEEDED:
+        raise RuntimeError(
+            f"SQL failed ({response.status.state}): "
+            f"{response.status.error}\nStatement: {sql[:200]}"
+        )
+    return response
 
 
 def _discover_warehouse(workspace) -> str:

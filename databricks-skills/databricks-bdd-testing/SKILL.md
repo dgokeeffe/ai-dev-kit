@@ -1,6 +1,6 @@
 ---
 name: databricks-bdd-testing
-description: "BDD testing with Python Behave and Databricks. Use when the user asks to set up BDD, create Gherkin feature files, write step definitions, scaffold a Behave project, run BDD tests, or test pipelines, Unity Catalog, jobs, or Apps using behavior-driven development."
+description: "BDD testing with Python Behave against Databricks. Use when the user asks to set up BDD, scaffold a Behave project, write Gherkin feature files or Given/When/Then step definitions for Databricks, or run behavior-driven tests against Unity Catalog SQL functions, Lakeflow SDP pipelines, or Databricks Apps via the Statement Execution API. Do NOT use for general pytest, unit testing without Gherkin, or non-Databricks BDD."
 ---
 
 # BDD testing with Python Behave
@@ -116,24 +116,38 @@ def step_result_is(context: Context, expected: str) -> None:
 The core pattern: call real UC functions via the Statement Execution API. No local PySpark needed.
 
 ```python
-from databricks.sdk import WorkspaceClient
+import os
+import time
 
-def call_rule(expr: str):
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.sql import StatementState
+
+
+def call_rule(expr: str, catalog: str, schema: str):
     """Execute a SQL expression against the warehouse and return the scalar result."""
     ws = WorkspaceClient()
-    warehouse_id = os.environ.get("DATABRICKS_WAREHOUSE_ID")
+    warehouse_id = os.environ["DATABRICKS_WAREHOUSE_ID"]
 
     # Auto-qualify unqualified function names
-    if "." not in expr.split("(")[0]:
-        func_name = expr.split("(")[0].strip()
+    func_name = expr.split("(", 1)[0].strip()
+    if "." not in func_name:
         expr = expr.replace(func_name, f"{catalog}.{schema}.{func_name}", 1)
 
     sql = f"SELECT {expr} AS result"
     response = ws.statement_execution.execute_statement(
         warehouse_id=warehouse_id,
         statement=sql,
-        wait_timeout="30s",
+        wait_timeout="30s",  # API blocks up to 30s (max). Poll if not yet terminal.
     )
+
+    # Poll until terminal state (statements >30s won't be done when execute returns).
+    while response.status.state in (StatementState.PENDING, StatementState.RUNNING):
+        time.sleep(2)
+        response = ws.statement_execution.get_statement(response.statement_id)
+
+    if response.status.state != StatementState.SUCCEEDED:
+        raise RuntimeError(f"SQL failed: {response.status.error}\n{sql}")
+
     raw = response.result.data_array[0][0]
     return _coerce(raw)  # Convert "true"->True, "false"->False, numeric->int/float
 ```
@@ -205,27 +219,39 @@ FROM timeline_with_lags t;
 
 ### Pattern 2: Ephemeral test schemas
 
-Each test run creates an isolated schema, preventing cross-run contamination:
+Each test run creates an isolated schema, preventing cross-run contamination. Sketch shown
+here; see [environment-template.md](references/environment-template.md) for the full template
+with auth, warehouse discovery, and parallel-worker isolation.
 
 ```python
-# environment.py
+# features/environment.py
+import os
+from datetime import datetime
+from databricks.sdk import WorkspaceClient
+
+
 def before_all(context):
-    ws = WorkspaceClient()
-    context.workspace = ws
+    context.workspace = WorkspaceClient()
+    context.warehouse_id = os.environ["DATABRICKS_WAREHOUSE_ID"]
+    catalog = os.environ.get("TEST_CATALOG", "main")
+
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    context.test_schema = f"behave_test_{ts}"
-    ws.statement_execution.execute_statement(
+    context.test_schema = f"{catalog}.behave_test_{ts}"
+
+    context.workspace.statement_execution.execute_statement(
         warehouse_id=context.warehouse_id,
-        statement=f"CREATE SCHEMA IF NOT EXISTS {context.catalog}.{context.test_schema}",
+        statement=f"CREATE SCHEMA IF NOT EXISTS {context.test_schema}",
         wait_timeout="30s",
     )
 
+
 def after_all(context):
-    context.workspace.statement_execution.execute_statement(
-        warehouse_id=context.warehouse_id,
-        statement=f"DROP SCHEMA IF EXISTS {context.catalog}.{context.test_schema} CASCADE",
-        wait_timeout="30s",
-    )
+    if hasattr(context, "test_schema"):
+        context.workspace.statement_execution.execute_statement(
+            warehouse_id=context.warehouse_id,
+            statement=f"DROP SCHEMA IF EXISTS {context.test_schema} CASCADE",
+            wait_timeout="30s",
+        )
 ```
 
 ### Pattern 3: Scenario Outlines for data-driven testing
@@ -269,6 +295,14 @@ Feature: Unity Catalog permissions
     When I grant SELECT on "customers" to group "readers"
     Then the group "readers" should have SELECT on "customers"
 ```
+
+### Pattern 6: Lakebase branching for OLTP test isolation
+
+For apps backed by Lakebase (managed PostgreSQL), use a copy-on-write branch per test
+run instead of an ephemeral schema. The branch shares storage with `production` so
+seeding is instant, and dropping the branch wipes test state without touching prod.
+See [gherkin-patterns.md](references/gherkin-patterns.md#lakebase-branching) for the
+full Gherkin pattern and step shape.
 
 ## Gherkin writing rules
 
@@ -332,5 +366,13 @@ bdd-report:
 
 ## External resources
 
-- [Public plugin repo](https://github.com/dgokeeffe/databricks-bdd-tools) — Full Claude Code plugin with four skills
 - [The Foundation of Modern DataOps](https://medium.com/dbsql-sme-engineering/the-foundation-of-modern-dataops-with-databricks-68e36f5d72e8) — DataOps testing principles
+- [Behave docs](https://behave.readthedocs.io/) — Python BDD reference
+- [Statement Execution API](https://docs.databricks.com/api/workspace/statementexecution) — Underlying execution API used by the test harness
+
+## Related skills
+
+- [databricks-unity-catalog](../databricks-unity-catalog/SKILL.md) — UC functions, grants, and securables under test
+- [databricks-spark-declarative-pipelines](../databricks-spark-declarative-pipelines/SKILL.md) — Lakeflow SDP pipelines exercised by `@pipeline` scenarios
+- [databricks-lakebase-autoscale](../databricks-lakebase-autoscale/SKILL.md) — Lakebase branching for PostgreSQL test isolation
+- [databricks-python-sdk](../databricks-python-sdk/SKILL.md) — `WorkspaceClient` patterns reused by step definitions

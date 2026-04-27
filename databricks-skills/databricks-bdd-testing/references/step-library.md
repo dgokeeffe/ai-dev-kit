@@ -197,16 +197,30 @@ def step_create_table_with_data(context: Context, table_name: str) -> None:
 # ─── Helpers ────────────────────────────────────────────────────
 
 def _execute_sql(context: Context, sql: str):
-    """Execute SQL and return result."""
-    result = context.workspace.statement_execution.execute_statement(
+    """Execute SQL via the Statement Execution API and poll until terminal.
+
+    `wait_timeout` blocks server-side for up to 30s (the API maximum). For longer
+    statements (DDL on large tables, MERGE jobs, etc.) we poll get_statement until
+    the state becomes terminal.
+    """
+    import time
+
+    response = context.workspace.statement_execution.execute_statement(
         warehouse_id=context.warehouse_id,
         statement=sql,
         wait_timeout="30s",
     )
-    assert result.status.state == StatementState.SUCCEEDED, (
-        f"SQL failed: {result.status.error}\nStatement: {sql[:200]}"
+
+    while response.status.state in (StatementState.PENDING, StatementState.RUNNING):
+        time.sleep(2)
+        response = context.workspace.statement_execution.get_statement(
+            response.statement_id
+        )
+
+    assert response.status.state == StatementState.SUCCEEDED, (
+        f"SQL failed: {response.status.error}\nStatement: {sql[:200]}"
     )
-    return result
+    return response
 
 
 def _count_rows(context: Context, table_name: str) -> int:
@@ -301,16 +315,27 @@ def step_verify_no_grant(
 
 
 def _execute_sql(context: Context, sql: str):
-    """Execute SQL and return result."""
-    result = context.workspace.statement_execution.execute_statement(
+    """Execute SQL and return result.
+
+    Identical to `common_steps._execute_sql` — kept local so each step file is
+    self-contained and copy-pasteable.
+    """
+    import time
+
+    response = context.workspace.statement_execution.execute_statement(
         warehouse_id=context.warehouse_id,
         statement=sql,
         wait_timeout="30s",
     )
-    assert result.status.state == StatementState.SUCCEEDED, (
-        f"SQL failed: {result.status.error}\nStatement: {sql[:200]}"
+    while response.status.state in (StatementState.PENDING, StatementState.RUNNING):
+        time.sleep(2)
+        response = context.workspace.statement_execution.get_statement(
+            response.statement_id
+        )
+    assert response.status.state == StatementState.SUCCEEDED, (
+        f"SQL failed: {response.status.error}\nStatement: {sql[:200]}"
     )
-    return result
+    return response
 ```
 
 ---
@@ -404,6 +429,11 @@ def step_pipeline_error_contains(context: Context, keyword: str) -> None:
 def _wait_for_pipeline(
     context: Context, timeout: int, expect_success: bool
 ) -> None:
+    """Poll the pipeline update until it reaches a terminal state.
+
+    `update.state` is an `UpdateInfoState` enum — compare via `.value` so the
+    string check is robust across SDK versions.
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
         update = context.workspace.pipelines.get_update(
@@ -411,15 +441,16 @@ def _wait_for_pipeline(
             update_id=context.update_id,
         )
         state = update.update.state
-        if state in ("COMPLETED",):
+        state_value = state.value if hasattr(state, "value") else str(state)
+        if state_value == "COMPLETED":
             if expect_success:
                 return
             raise AssertionError("Expected pipeline to fail, but it succeeded")
-        if state in ("FAILED", "CANCELED"):
+        if state_value in ("FAILED", "CANCELED"):
             if not expect_success:
                 return
             raise AssertionError(
-                f"Pipeline update {state}. Check update {context.update_id}"
+                f"Pipeline update {state_value}. Check update {context.update_id}"
             )
         time.sleep(15)
     raise TimeoutError(f"Pipeline did not complete within {timeout}s")
@@ -461,7 +492,9 @@ def step_run_notebook(context: Context, path: str) -> None:
         value = row["value"].replace("{schema}", context.test_schema)
         params[row["key"]] = value
 
-    run = context.workspace.jobs.submit(
+    # jobs.submit() returns a Wait[Run]. The run_id is exposed directly on the
+    # waiter — no need to block on the result here.
+    waiter = context.workspace.jobs.submit(
         run_name=f"behave-{context.scenario.name[:50]}",
         tasks=[
             SubmitTask(
@@ -473,7 +506,7 @@ def step_run_notebook(context: Context, path: str) -> None:
             )
         ],
     )
-    context.run_id = run.response.run_id
+    context.run_id = waiter.run_id
 
 
 @then('the job should complete with status "{expected}" within {timeout:d} seconds')

@@ -345,6 +345,81 @@ Feature: Data quality checks
 
 ---
 
+## Lakebase branching
+
+For Databricks Apps backed by Lakebase (managed PostgreSQL), create a short-lived branch
+off `production` for each test run instead of provisioning a separate database. Branches
+use copy-on-write storage — seeding is effectively free and tearing down is one API call.
+
+```gherkin
+@app @lakebase
+Feature: Application backed by Lakebase
+  As a developer
+  I want each test run to use an isolated database branch
+  So that tests do not contaminate production data
+
+  Background:
+    Given a Lakebase project "my-app" exists
+    And a test branch is provisioned from "production"
+
+  @smoke
+  Scenario: New user is persisted to the test branch
+    When I POST "/api/users" with auth headers and body:
+      """json
+      {"email": "alice@example.com", "name": "Alice"}
+      """
+    Then the response status should be 201
+    And the table "users" in the test branch should contain a row where "email" is "alice@example.com"
+
+  Scenario: Test branch isolates writes from production
+    Given the production branch has 100 rows in "users"
+    When I POST "/api/users" with auth headers and body:
+      """json
+      {"email": "bob@example.com", "name": "Bob"}
+      """
+    Then the table "users" in the test branch should have 101 rows
+    And the table "users" in the production branch should still have 100 rows
+```
+
+The corresponding `environment.py` lifecycle:
+
+```python
+# features/environment.py — Lakebase branch hooks (sketch)
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.postgres import Branch, BranchSpec, Duration
+
+
+def before_all(context):
+    context.workspace = WorkspaceClient()
+    context.lakebase_project = "projects/my-app"
+    branch_id = f"behave-{int(time.time())}"
+
+    branch = context.workspace.postgres.create_branch(
+        parent=context.lakebase_project,
+        branch=Branch(spec=BranchSpec(
+            source_branch=f"{context.lakebase_project}/branches/production",
+            ttl=Duration(seconds=3600),  # 1h safety net
+        )),
+        branch_id=branch_id,
+    ).wait()
+    context.test_branch = branch.name  # e.g. projects/my-app/branches/behave-...
+
+
+def after_all(context):
+    if hasattr(context, "test_branch"):
+        context.workspace.postgres.delete_branch(name=context.test_branch)
+```
+
+Notes:
+
+- The `ttl` is a safety net — if the test process crashes, Lakebase auto-deletes the branch.
+- Connect through the branch's primary endpoint, not production's, when running tests.
+  See `databricks-lakebase-autoscale` skill for the OAuth + `psycopg` connection pattern.
+- For row-level assertions, expose two cursors — one bound to the test branch endpoint and
+  one bound to production — so scenarios can verify isolation directly.
+
+---
+
 ## Asset Bundles Deployment
 
 ```gherkin
